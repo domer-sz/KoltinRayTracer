@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<project version="4">
+  <component name="RemoteRepositoriesConfiguration">
+    <remote-repository>
+      <option name="id" value="central" />
+      <option name="name" value="Central Repository" />
+      <option name="url" value="https://repo.maven.apache.org/maven2" />
+    </remote-repository>
+    <remote-repository>
+      <option name="id" value="dlmidest-jforg-io-central" />
+      <option name="name" value="libs-release" />
+      <option name="url" value="https://dlmidest.jfrog.io/artifactory/mid-release" />
+    </remote-repository>
+    <remote-repository>
+      <option name="id" value="smartsdk-android-local" />
+      <option name="name" value="smartsdk-android-local" />
+      <option name="url" value="https://mi-artifactory.otlabs.fr/artifactory/smartsdk-android-local" />
+    </remote-repository>
+    <remote-repository>
+      <option name="id" value="dlmidest-jforg-io-snapshots" />
+      <option name="name" value="libs-snapshot" />
+      <option name="url" value="https://dlmidest.jfrog.io/artifactory/mid-snapshot" />
+    </remote-repository>
+    <remote-repository>
+      <option name="id" value="central-dlmidest" />
+      <option name="name" value="libs-release" />
+      <option name="url" value="https://dlmidest.jfrog.io/dlmidest/did-library-release-local" />
+    </remote-repository>
+    <remote-repository>
+      <option name="id" value="central" />
+      <option name="name" value="Maven Central repository" />
+      <option name="url" value="https://repo1.maven.org/maven2" />
+    </remote-repository>
+    <remote-repository>
+      <option name="id" value="jboss.community" />
+      <option name="name" value="JBoss Community repository" />
+      <option name="url" value="https://repository.jboss.org/nexus/content/repositories/public/" />
+    </remote-repository>
+    <remote-repository>
+      <option name="id" value="maven.gluu.org" />
+      <option name="name" value="GluuPublic Repository" />
+      <option name="url" value="https://maven.gluu.org/maven/" />
+    </remote-repository>
+    <remote-repository>
+      <option name="id" value="snapshots-dlmidest" />
+      <option name="name" value="libs-snapshot" />
+      <option name="url" value="https://dlmidest.jfrog.io/dlmidest/did-library-release-local" />
+    </remote-repository>
+  </component>
+</project>
