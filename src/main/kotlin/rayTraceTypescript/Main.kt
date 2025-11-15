@@ -15,7 +15,7 @@ fun main() {
     camera.aspectRatio = 16.0 / 9.0
     camera.imageWidth = 300
     camera.samplesPerPixel = 50
-    camera.maxReflectionDepth = 40
+    camera.maxReflectionDepth = 45
 
     camera.vfov = 20.0
     camera.lookFrom = Point(13.0, 2.0, 3.0)
