@@ -28,7 +28,9 @@ fun main() {
     camera.render(world)
 }
 
-fun prepareWorld(): HittableList {
+fun prepareWorld(): HittableList = WorldData.hardcodedWorld()
+
+fun randomWorld(): HittableList {
     val worldObjects: MutableList<Hittable> = mutableListOf()
 
     val groundMaterial = Lambertian(Color(0.5, 0.5, 0.5))
