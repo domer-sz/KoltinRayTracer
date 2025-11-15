@@ -37,9 +37,19 @@
       <option name="url" value="https://repository.jboss.org/nexus/content/repositories/public/" />
     </remote-repository>
     <remote-repository>
+      <option name="id" value="beelday-github-packages" />
+      <option name="name" value="beelday-github-packages" />
+      <option name="url" value="https://maven.pkg.github.com/Pragmatic-Brains/*" />
+    </remote-repository>
+    <remote-repository>
       <option name="id" value="maven.gluu.org" />
       <option name="name" value="GluuPublic Repository" />
       <option name="url" value="https://maven.gluu.org/maven/" />
+    </remote-repository>
+    <remote-repository>
+      <option name="id" value="central" />
+      <option name="name" value="central" />
+      <option name="url" value="https://repo1.maven.org/maven2" />
     </remote-repository>
     <remote-repository>
       <option name="id" value="snapshots-dlmidest" />
