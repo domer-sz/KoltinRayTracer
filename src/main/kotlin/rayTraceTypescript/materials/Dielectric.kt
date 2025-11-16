@@ -6,7 +6,7 @@ import rayTraceTypescript.Vector
 import rayTraceTypescript.objects.Hit
 import kotlin.math.min
 import kotlin.math.sqrt
-import kotlin.random.Random
+import rayTraceTypescript.utils.RandomSource
 
 class Dielectric(val ri: Double) : Material {
     override fun scatter(rayIn: Ray, hit: Hit): ScatteredResult? {
@@ -17,7 +17,7 @@ class Dielectric(val ri: Double) : Material {
         val sinTheta = sqrt(1.0 - cosTheta * cosTheta)
 
         val cannotRefract = refractionRatio * sinTheta > 1.0
-        val useReflect = cannotRefract || reflectance(cosTheta, refractionRatio) > Random.nextDouble()
+        val useReflect = cannotRefract || reflectance(cosTheta, refractionRatio) > RandomSource.nextDouble()
         val direction = if (useReflect)
             Vector.Companion.reflect(unitDirection, hit.normal)
         else

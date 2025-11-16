@@ -10,8 +10,10 @@ import rayTraceTypescript.Point
 import rayTraceTypescript.Ray
 import rayTraceTypescript.Vector
 import java.nio.file.Files
+import java.nio.file.Path
 import java.nio.file.Paths
 import java.nio.charset.StandardCharsets
+import rayTraceTypescript.utils.RandomSource
 
 class Camera {
     var aspectRatio: Double = 16.0 / 9.0
@@ -36,7 +38,7 @@ class Camera {
     private lateinit var defocusDiscU: Vector
     private lateinit var defocusDiscV: Vector
 
-    fun render(world: HittableList) {
+    fun render(world: HittableList, outputPath: Path = Paths.get("image.ppm")) {
         initialize()
 
         val header = "P3\n${imageWidth} ${imageHeight}\n255\n"
@@ -76,7 +78,7 @@ class Camera {
             }
         }
 
-        Files.write(Paths.get("image.ppm"), sb.toString().toByteArray(StandardCharsets.UTF_8))
+        Files.write(outputPath, sb.toString().toByteArray(StandardCharsets.UTF_8))
         println("\r[" + "#".repeat(40) + "] 100%")
     }
 
@@ -113,7 +115,7 @@ class Camera {
     }
 
     fun sampleSquare(): Vector =
-        Vector(kotlin.random.Random.nextDouble() - 0.5, kotlin.random.Random.nextDouble() - 0.5, 0.0)
+        Vector(RandomSource.nextDouble() - 0.5, RandomSource.nextDouble() - 0.5, 0.0)
 
     private fun defocusDiskSample(): Point {
         val p = Vector.randomVectorInUnitDisc()
