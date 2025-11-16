@@ -81,5 +81,6 @@ open class Vector(val x: Float, val y: Float, val z: Float) {
 operator fun Vector.plus(other: Vector): Vector = this.plus(other)
 operator fun Vector.minus(other: Vector): Vector = this.minus(other)
 operator fun Vector.times(s: Float): Vector = this.scale(s)
+operator fun Vector.times(other: Vector): Vector = this.multiply(other)
 operator fun Vector.div(s: Float): Vector = this.divide(s)
 operator fun Vector.unaryMinus(): Vector = this.negate()

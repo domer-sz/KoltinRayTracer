@@ -40,3 +40,9 @@ class Color(val r: Float, val g: Float, val b: Float) {
         @JvmStatic fun dotProduct(u: Color, v: Color): Float = u.r*v.r + u.g*v.g + u.b*v.b
     }
 }
+
+operator fun Color.plus(other: Color): Color = this.plus(other)
+operator fun Color.minus(other: Color): Color = this.minus(other)
+operator fun Color.times(s: Float): Color = this.scale(s)
+operator fun Color.times(other: Color): Color = this.multiply(other)
+operator fun Color.div(s: Float): Color = this.divide(s)
