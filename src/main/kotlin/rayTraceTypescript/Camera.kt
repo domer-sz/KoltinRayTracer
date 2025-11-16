@@ -16,21 +16,21 @@ import java.nio.charset.StandardCharsets
 import rayTraceTypescript.utils.RandomSource
 
 class Camera {
-    var aspectRatio: Double = 16.0 / 9.0
+    var aspectRatio: Float = 16.0f / 9.0f
     var imageWidth: Int = 400
     var samplesPerPixel: Int = 100
     var maxReflectionDepth: Int = 10
 
-    var vfov: Double = 90.0
-    var lookFrom: Point = Point(0.0, 0.0, 0.0)
-    var lookAt: Point = Point(0.0, 0.0, -1.0)
-    var vUp: Vector = Vector(0.0, 1.0, 0.0)
+    var vfov: Float = 90.0f
+    var lookFrom: Point = Point(0.0f, 0.0f, 0.0f)
+    var lookAt: Point = Point(0.0f, 0.0f, -1.0f)
+    var vUp: Vector = Vector(0.0f, 1.0f, 0.0f)
 
-    var defocusAngle: Double = 0.0
-    var focusDistance: Double = 10.0
+    var defocusAngle: Float = 0.0f
+    var focusDistance: Float = 10.0f
 
     private var imageHeight: Int = 0
-    private var pixelSamplesScale: Double = 1.0
+    private var pixelSamplesScale: Float = 1.0f
     private lateinit var cameraCenter: Point
     private lateinit var pixelDeltaU: Vector
     private lateinit var pixelDeltaV: Vector
@@ -50,9 +50,9 @@ class Camera {
 
         for (y in 0 until imageHeight) {
             for (x in 0 until imageWidth) {
-                var pixelColor = Color(0.0, 0.0, 0.0)
+                var pixelColor = Color(0.0f, 0.0f, 0.0f)
                 repeat(samplesPerPixel) {
-                    val ray = getRay(x.toDouble(), y.toDouble())
+                    val ray = getRay(x.toFloat(), y.toFloat())
                     val sampleColor = rayColor(ray, maxReflectionDepth, world)
                     pixelColor = pixelColor.plus(sampleColor)
                 }
@@ -83,39 +83,39 @@ class Camera {
     }
 
     private fun rayColor(ray: Ray, reflectionDepth: Int, world: HittableList): Color {
-        if (reflectionDepth <= 0) return Color(0.0, 0.0, 0.0)
+        if (reflectionDepth <= 0) return Color(0.0f, 0.0f, 0.0f)
 
-        val hit = world.hit(ray, Interval(0.001, infinity))
+        val hit = world.hit(ray, Interval(0.001f, infinity))
         if (hit != null) {
             val scatteredResult = hit.material.scatter(ray, hit)
             if (scatteredResult != null) {
                 val rec = rayColor(scatteredResult.scattered, reflectionDepth - 1, world)
                 return rec.multiply(scatteredResult.albedo)
             }
-            return Color(0.0, 0.0, 0.0)
+            return Color(0.0f, 0.0f, 0.0f)
         }
 
         val unitDirection = ray.direction.unit()
-        val alpha = 0.5 * (unitDirection.y + 1.0)
-        val white = Color(1.0, 1.0, 1.0).scale(1.0 - alpha)
-        val blue = Color(0.5, 0.7, 1.0).scale(alpha)
+        val alpha = 0.5f * (unitDirection.y + 1.0f)
+        val white = Color(1.0f, 1.0f, 1.0f).scale(1.0f - alpha)
+        val blue = Color(0.5f, 0.7f, 1.0f).scale(alpha)
         return white.plus(blue)
     }
 
-    fun getRay(x: Double, y: Double): Ray {
+    fun getRay(x: Float, y: Float): Ray {
         val offset = sampleSquare()
         val pixelSample = Point(
             pixel00.x + pixelDeltaU.x * (x + offset.x) + pixelDeltaV.x * (y + offset.y),
             pixel00.y + pixelDeltaU.y * (x + offset.x) + pixelDeltaV.y * (y + offset.y),
             pixel00.z + pixelDeltaU.z * (x + offset.x) + pixelDeltaV.z * (y + offset.y)
         )
-        val rayOrigin = if (defocusAngle <= 0.0) cameraCenter else defocusDiskSample()
+        val rayOrigin = if (defocusAngle <= 0.0f) cameraCenter else defocusDiskSample()
         val rayDirection = pixelSample.minus(rayOrigin)
         return Ray(rayOrigin, rayDirection)
     }
 
     fun sampleSquare(): Vector =
-        Vector(RandomSource.nextDouble() - 0.5, RandomSource.nextDouble() - 0.5, 0.0)
+        Vector(RandomSource.nextFloat() - 0.5f, RandomSource.nextFloat() - 0.5f, 0.0f)
 
     private fun defocusDiskSample(): Point {
         val p = Vector.randomVectorInUnitDisc()
@@ -127,16 +127,16 @@ class Camera {
     }
 
     private fun initialize() {
-        imageHeight = floor(imageWidth.toDouble() / aspectRatio).toInt()
+        imageHeight = floor(imageWidth.toFloat() / aspectRatio).toInt()
         if (imageHeight < 1) imageHeight = 1
 
-        pixelSamplesScale = 1.0 / samplesPerPixel.toDouble()
+        pixelSamplesScale = 1.0f / samplesPerPixel.toFloat()
         cameraCenter = lookFrom
 
         val theta = degreesToRadians(vfov)
-        val h = tan(theta / 2.0)
-        val viewportHeight = 2.0 * h * focusDistance
-        val viewportWidth = viewportHeight * (imageWidth.toDouble() / imageHeight.toDouble())
+        val h = tan((theta / 2.0f).toDouble()).toFloat()
+        val viewportHeight = 2.0f * h * focusDistance
+        val viewportWidth = viewportHeight * (imageWidth.toFloat() / imageHeight.toFloat())
 
         val w = Vector.unit(lookFrom.minus(lookAt))
         val u = Vector.unit(Vector.cross(vUp, w))
@@ -145,20 +145,21 @@ class Camera {
         val viewportU = u.scale(viewportWidth)
         val viewportV = v.negate().scale(viewportHeight)
 
-        pixelDeltaU = viewportU.divide(imageWidth.toDouble())
-        pixelDeltaV = viewportV.divide(imageHeight.toDouble())
+        pixelDeltaU = viewportU.divide(imageWidth.toFloat())
+        pixelDeltaV = viewportV.divide(imageHeight.toFloat())
 
         val viewportUpperLeft = cameraCenter.minus(w.scale(focusDistance))
-            .minus(viewportU.divide(2.0))
-            .minus(viewportV.divide(2.0))
+            .minus(viewportU.divide(2.0f))
+            .minus(viewportV.divide(2.0f))
 
         pixel00 = Point(
-            viewportUpperLeft.x + pixelDeltaU.x * 0.5 + pixelDeltaV.x * 0.5,
-            viewportUpperLeft.y + pixelDeltaU.y * 0.5 + pixelDeltaV.y * 0.5,
-            viewportUpperLeft.z + pixelDeltaU.z * 0.5 + pixelDeltaV.z * 0.5
+            viewportUpperLeft.x + pixelDeltaU.x * 0.5f + pixelDeltaV.x * 0.5f,
+            viewportUpperLeft.y + pixelDeltaU.y * 0.5f + pixelDeltaV.y * 0.5f,
+            viewportUpperLeft.z + pixelDeltaU.z * 0.5f + pixelDeltaV.z * 0.5f
         )
 
-        val defocusRadius = focusDistance * tan(degreesToRadians(defocusAngle) / 2.0)
+        val defocusRadius =
+            focusDistance * tan((degreesToRadians(defocusAngle) / 2.0f).toDouble()).toFloat()
         defocusDiscU = u.scale(defocusRadius)
         defocusDiscV = v.scale(defocusRadius)
     }

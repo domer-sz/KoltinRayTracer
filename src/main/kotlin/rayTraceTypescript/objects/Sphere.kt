@@ -7,7 +7,8 @@ import rayTraceTypescript.Vector
 import rayTraceTypescript.materials.Material
 import kotlin.math.sqrt
 
-class Sphere(val center: Point, val radius: Double, val material: Material) : Hittable {
+class Sphere(val center: Point, val radius: Float, val material: Material) : Hittable {
+    constructor(center: Point, radius: Double, material: Material) : this(center, radius.toFloat(), material)
     override fun hit(ray: Ray, rayT: Interval): Hit? {
         val oc = ray.origin.minus(center)
         val a = ray.direction.lengthSquared()

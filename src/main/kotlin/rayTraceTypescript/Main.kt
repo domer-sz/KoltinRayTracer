@@ -12,18 +12,18 @@ fun main() {
     val world: HittableList = prepareWorld()
     val camera = Camera()
 
-    camera.aspectRatio = 16.0 / 9.0
+    camera.aspectRatio = 16.0f / 9.0f
     camera.imageWidth = 300
     camera.samplesPerPixel = 50
     camera.maxReflectionDepth = 45
 
-    camera.vfov = 20.0
-    camera.lookFrom = Point(13.0, 2.0, 3.0)
-    camera.lookAt = Point(0.0, 0.0, 0.0)
-    camera.vUp = Vector(0.0, 1.0, 0.0)
+    camera.vfov = 20.0f
+    camera.lookFrom = Point(13.0f, 2.0f, 3.0f)
+    camera.lookAt = Point(0.0f, 0.0f, 0.0f)
+    camera.vUp = Vector(0.0f, 1.0f, 0.0f)
 
-    camera.defocusAngle = 0.6
-    camera.focusDistance = 10.0
+    camera.defocusAngle = 0.6f
+    camera.focusDistance = 10.0f
 
     camera.render(world)
 }
@@ -33,36 +33,36 @@ fun prepareWorld(): HittableList = WorldData.hardcodedWorld()
 fun randomWorld(): HittableList {
     val worldObjects: MutableList<Hittable> = mutableListOf()
 
-    val groundMaterial = Lambertian(Color(0.5, 0.5, 0.5))
-    val groundSphere = Sphere(Point(0.0, -1000.0, 0.0), 1000.0, groundMaterial)
+    val groundMaterial = Lambertian(Color(0.5f, 0.5f, 0.5f))
+    val groundSphere = Sphere(Point(0.0f, -1000.0f, 0.0f), 1000.0, groundMaterial)
     worldObjects.add(groundSphere)
 
-    fun rand() = randomFloat(0.0, 1.0)
-    fun randRange(min: Double = 0.0, max: Double = 1.0) = randomFloat(min, max)
-    fun randomColor(min: Double = 0.0, max: Double = 1.0) =
+    fun rand() = randomFloat(0.0f, 1.0f)
+    fun randRange(min: Float = 0.0f, max: Float = 1.0f) = randomFloat(min, max)
+    fun randomColor(min: Float = 0.0f, max: Float = 1.0f) =
         Color(randRange(min, max), randRange(min, max), randRange(min, max))
 
     for (a in -11..10) {
         for (b in -11..10) {
             val chooseMat = rand()
-            val center = Point(a + 0.9 * rand(), 0.2, b + 0.9 * rand())
-            if ((center.minus(Point(4.0, 0.2, 0.0))).length() > 0.9) {
-                if (chooseMat < 0.8) {
+            val center = Point(a + 0.9f * rand(), 0.2f, b + 0.9f * rand())
+            if ((center.minus(Point(4.0f, 0.2f, 0.0f))).length() > 0.9f) {
+                if (chooseMat < 0.8f) {
                     val albedo = randomColor().multiply(randomColor())
-                    worldObjects.add(Sphere(center, 0.2, Lambertian(albedo)))
-                } else if (chooseMat < 0.95) {
-                    val albedo = randomColor(0.5, 1.0)
-                    val fuzz = randRange(0.0, 0.5)
-                    worldObjects.add(Sphere(center, 0.2, Metal(albedo, fuzz)))
+                    worldObjects.add(Sphere(center, 0.2f, Lambertian(albedo)))
+                } else if (chooseMat < 0.95f) {
+                    val albedo = randomColor(0.5f, 1.0f)
+                    val fuzz = randRange(0.0f, 0.5f)
+                    worldObjects.add(Sphere(center, 0.2f, Metal(albedo, fuzz)))
                 } else {
-                    worldObjects.add(Sphere(center, 0.2, Dielectric(1.5)))
+                    worldObjects.add(Sphere(center, 0.2f, Dielectric(1.5f)))
                 }
             }
         }
     }
 
-    worldObjects.add(Sphere(Point(0.0, 1.0, 0.0), 1.0, Dielectric(1.5)))
-    worldObjects.add(Sphere(Point(-4.0, 1.0, 0.0), 1.0, Lambertian(Color(0.4, 0.2, 0.1))))
-    worldObjects.add(Sphere(Point(4.0, 1.0, 0.0), 1.0, Metal(Color(0.7, 0.6, 0.5), 0.0)))
+    worldObjects.add(Sphere(Point(0.0f, 1.0f, 0.0f), 1.0f, Dielectric(1.5f)))
+    worldObjects.add(Sphere(Point(-4.0f, 1.0f, 0.0f), 1.0f, Lambertian(Color(0.4f, 0.2f, 0.1f))))
+    worldObjects.add(Sphere(Point(4.0f, 1.0f, 0.0f), 1.0f, Metal(Color(0.7f, 0.6f, 0.5f), 0.0f)))
     return HittableList(worldObjects)
 }

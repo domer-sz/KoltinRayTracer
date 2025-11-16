@@ -2,8 +2,8 @@ package rayTraceTypescript.utils
 
 import rayTraceTypescript.utils.RandomSource
 
-const val infinity: Double = Double.POSITIVE_INFINITY
-const val pi: Double = 3.141592653589793
+const val infinity: Float = Float.POSITIVE_INFINITY
+const val pi: Float = 3.1415927f
 
-fun degreesToRadians(degrees: Double): Double = degrees * pi / 180.0
-fun randomFloat(min: Double, max: Double): Double = RandomSource.nextDouble(min, max)
+fun degreesToRadians(degrees: Float): Float = degrees * pi / 180.0f
+fun randomFloat(min: Float, max: Float): Float = RandomSource.nextFloat(min, max)

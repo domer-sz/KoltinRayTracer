@@ -13,7 +13,7 @@ object RandomSource {
         rng = Random.Default
     }
 
-    fun nextDouble(): Double = rng.nextDouble()
+    fun nextFloat(): Float = rng.nextFloat()
 
-    fun nextDouble(min: Double, max: Double): Double = rng.nextDouble(min, max)
+    fun nextFloat(min: Float, max: Float): Float = rng.nextFloat() * (max - min) + min
 }

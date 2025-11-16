@@ -20,8 +20,7 @@ class ImageRegressionTest {
         assertEquals(reference.height, actual.height, "reference height")
 
         val diff = diffStats(reference, actual)
-        // Camera.sampleSquare, defocusDiskSample, and the material scatter routines all rely on Random.Default.
-        // The thresholds below allow for that stochastic noise while still flagging real regressions.
+        // Ziarno RNG ustawiamy w teście, więc oczekujemy zerowych różnic między renderami.
         assertTrue(
             diff.meanAbsDiff <= MEAN_ABS_DIFF_THRESHOLD,
             "Mean absolute difference ${diff.meanAbsDiff} exceeds $MEAN_ABS_DIFF_THRESHOLD"
@@ -34,16 +33,16 @@ class ImageRegressionTest {
 
     private fun renderCurrentScene(): PpmImage {
         val camera = Camera().apply {
-            aspectRatio = 16.0 / 9.0
+            aspectRatio = 16.0f / 9.0f
             imageWidth = 300
             samplesPerPixel = 50
             maxReflectionDepth = 45
-            vfov = 20.0
-            lookFrom = Point(13.0, 2.0, 3.0)
-            lookAt = Point(0.0, 0.0, 0.0)
-            vUp = Vector(0.0, 1.0, 0.0)
-            defocusAngle = 0.6
-            focusDistance = 10.0
+            vfov = 20.0f
+            lookFrom = Point(13.0f, 2.0f, 3.0f)
+            lookAt = Point(0.0f, 0.0f, 0.0f)
+            vUp = Vector(0.0f, 1.0f, 0.0f)
+            defocusAngle = 0.6f
+            focusDistance = 10.0f
         }
         val world = prepareWorld()
         val tempFile = Files.createTempFile("raytracer-image-test", ".ppm")
@@ -84,22 +83,22 @@ class ImageRegressionTest {
 
     private fun diffStats(expected: PpmImage, actual: PpmImage): DiffStats {
         require(expected.pixels.size == actual.pixels.size) { "Pixel counts differ" }
-        var sum = 0.0
+        var sum = 0.0f
         var maxDiff = 0
         var highDiffCount = 0
         expected.pixels.indices.forEach { idx ->
             val delta = abs(expected.pixels[idx] - actual.pixels[idx])
-            sum += delta
+            sum += delta.toFloat()
             if (delta > maxDiff) maxDiff = delta
             if (delta >= HIGH_DIFF_THRESHOLD) highDiffCount += 1
         }
-        val mean = sum / expected.pixels.size
+        val mean = sum / expected.pixels.size.toFloat()
         return DiffStats(mean, maxDiff, highDiffCount)
     }
 
     data class PpmImage(val width: Int, val height: Int, val pixels: IntArray)
 
-    data class DiffStats(val meanAbsDiff: Double, val maxDiff: Int, val highDiffCount: Int)
+    data class DiffStats(val meanAbsDiff: Float, val maxDiff: Int, val highDiffCount: Int)
 
     private fun maybeUpdateReference(bytes: ByteArray) {
         if (System.getenv("UPDATE_REFERENCE_IMAGE") == "1") {
@@ -111,7 +110,7 @@ class ImageRegressionTest {
     }
 
     companion object {
-        private const val MEAN_ABS_DIFF_THRESHOLD = 0.0
+        private const val MEAN_ABS_DIFF_THRESHOLD = 0.0f
         private const val HIGH_DIFF_THRESHOLD = 55
         private const val MAX_HIGH_DIFF_CHANNELS = 0
     }
