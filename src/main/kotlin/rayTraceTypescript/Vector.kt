@@ -8,11 +8,15 @@ import kotlin.math.sqrt
 open class Vector(val x: Float, val y: Float, val z: Float) {
     constructor(x: Double, y: Double, z: Double) : this(x.toFloat(), y.toFloat(), z.toFloat())
     fun negate(): Vector = Vector(-x, -y, -z)
-    fun plus(other: Vector): Vector = Vector(x + other.x, y + other.y, z + other.z)
-    fun minus(other: Vector): Vector = Vector(x - other.x, y - other.y, z - other.z)
+    operator fun unaryMinus(): Vector = negate()
+    operator fun plus(other: Vector): Vector = Vector(x + other.x, y + other.y, z + other.z)
+    operator fun minus(other: Vector): Vector = Vector(x - other.x, y - other.y, z - other.z)
     fun scale(s: Float): Vector = Vector(x * s, y * s, z * s)
+    operator fun times(s: Float): Vector = scale(s)
     fun divide(s: Float): Vector = Vector(x / s, y / s, z / s)
+    operator fun div(s: Float): Vector = divide(s)
     fun multiply(other: Vector): Vector = Vector(x * other.x, y * other.y, z * other.z)
+    operator fun times(other: Vector): Vector = multiply(other)
 
     fun length(): Float = sqrt(lengthSquared())
     fun lengthSquared(): Float = x * x + y * y + z * z
@@ -61,26 +65,19 @@ open class Vector(val x: Float, val y: Float, val z: Float) {
         @JvmStatic
         fun randomOnHemisphere(normal: Vector): Vector {
             val onUnitSphere = randomInUnitSphere().unit()
-            return if (dotProduct(onUnitSphere, normal) > 0.0f) onUnitSphere else onUnitSphere.negate()
+            return if (dotProduct(onUnitSphere, normal) > 0.0f) onUnitSphere else -onUnitSphere
         }
 
         @JvmStatic
         fun reflect(v: Vector, n: Vector): Vector =
-            v.minus(n.scale(2.0f * dotProduct(v, n)))
+            v - n * (2.0f * dotProduct(v, n))
 
         @JvmStatic
         fun refract(uv: Vector, n: Vector, etai_over_etat: Float): Vector {
-            val cosTheta = min(dotProduct(uv.negate(), n), 1.0f)
-            val rOutPerp = (n.scale(cosTheta).plus(uv)).scale(etai_over_etat)
-            val rOutParallel = n.scale(sqrt(abs(1.0f - rOutPerp.lengthSquared()))).negate()
-            return rOutPerp.plus(rOutParallel)
+            val cosTheta = min(dotProduct(-uv, n), 1.0f)
+            val rOutPerp = (n * cosTheta + uv) * etai_over_etat
+            val rOutParallel = -(n * sqrt(abs(1.0f - rOutPerp.lengthSquared())))
+            return rOutPerp + rOutParallel
         }
     }
 }
-
-operator fun Vector.plus(other: Vector): Vector = this.plus(other)
-operator fun Vector.minus(other: Vector): Vector = this.minus(other)
-operator fun Vector.times(s: Float): Vector = this.scale(s)
-operator fun Vector.times(other: Vector): Vector = this.multiply(other)
-operator fun Vector.div(s: Float): Vector = this.divide(s)
-operator fun Vector.unaryMinus(): Vector = this.negate()

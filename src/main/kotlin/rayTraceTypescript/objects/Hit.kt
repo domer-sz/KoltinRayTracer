@@ -15,6 +15,6 @@ class Hit(ray: Ray, val point: Point, outwardNormal: Vector, val material: Mater
 
     fun setFrontFace(ray: Ray, outwardNormal: Vector) {
         frontFace = Vector.dotProduct(ray.direction, outwardNormal) < 0.0f
-        normal = if (frontFace) outwardNormal else outwardNormal.negate()
+        normal = if (frontFace) outwardNormal else -outwardNormal
     }
 }

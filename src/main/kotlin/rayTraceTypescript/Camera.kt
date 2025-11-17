@@ -110,7 +110,7 @@ class Camera {
             pixel00.z + pixelDeltaU.z * (x + offset.x) + pixelDeltaV.z * (y + offset.y)
         )
         val rayOrigin = if (defocusAngle <= 0.0f) cameraCenter else defocusDiskSample()
-        val rayDirection = pixelSample.minus(rayOrigin)
+        val rayDirection = pixelSample - rayOrigin
         return Ray(rayOrigin, rayDirection)
     }
 
@@ -138,19 +138,19 @@ class Camera {
         val viewportHeight = 2.0f * h * focusDistance
         val viewportWidth = viewportHeight * (imageWidth.toFloat() / imageHeight.toFloat())
 
-        val w = Vector.unit(lookFrom.minus(lookAt))
+        val w = Vector.unit(lookFrom - lookAt)
         val u = Vector.unit(Vector.cross(vUp, w))
         val v = Vector.cross(w, u)
 
-        val viewportU = u.scale(viewportWidth)
-        val viewportV = v.negate().scale(viewportHeight)
+        val viewportU = u * viewportWidth
+        val viewportV = (-v) * viewportHeight
 
-        pixelDeltaU = viewportU.divide(imageWidth.toFloat())
-        pixelDeltaV = viewportV.divide(imageHeight.toFloat())
+        pixelDeltaU = viewportU / imageWidth.toFloat()
+        pixelDeltaV = viewportV / imageHeight.toFloat()
 
-        val viewportUpperLeft = cameraCenter.minus(w.scale(focusDistance))
-            .minus(viewportU.divide(2.0f))
-            .minus(viewportV.divide(2.0f))
+        val viewportCorner = cameraCenter - w * focusDistance
+        val viewportUpperLeftShiftedU = viewportCorner - (viewportU / 2.0f)
+        val viewportUpperLeft = viewportUpperLeftShiftedU - (viewportV / 2.0f)
 
         pixel00 = Point(
             viewportUpperLeft.x + pixelDeltaU.x * 0.5f + pixelDeltaV.x * 0.5f,
@@ -160,7 +160,7 @@ class Camera {
 
         val defocusRadius =
             focusDistance * tan((degreesToRadians(defocusAngle) / 2.0f).toDouble()).toFloat()
-        defocusDiscU = u.scale(defocusRadius)
-        defocusDiscV = v.scale(defocusRadius)
+        defocusDiscU = u * defocusRadius
+        defocusDiscV = v * defocusRadius
     }
 }

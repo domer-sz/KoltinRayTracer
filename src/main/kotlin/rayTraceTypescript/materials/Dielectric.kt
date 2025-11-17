@@ -15,7 +15,7 @@ class Dielectric(val ri: Float) : Material {
         val attenuation = Color(1.0f, 1.0f, 1.0f)
         val refractionRatio = if (hit.frontFace) 1.0f / ri else ri
         val unitDirection = rayIn.direction.unit()
-        val cosTheta = min(Vector.Companion.dotProduct(unitDirection.negate(), hit.normal), 1.0f)
+        val cosTheta = min(Vector.Companion.dotProduct(-unitDirection, hit.normal), 1.0f)
         val sinTheta = sqrt(1.0f - cosTheta * cosTheta)
 
         val cannotRefract = refractionRatio * sinTheta > 1.0f

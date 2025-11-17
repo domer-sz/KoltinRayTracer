@@ -10,9 +10,9 @@ import kotlin.math.sqrt
 class Sphere(val center: Point, val radius: Float, val material: Material) : Hittable {
     constructor(center: Point, radius: Double, material: Material) : this(center, radius.toFloat(), material)
     override fun hit(ray: Ray, rayT: Interval): Hit? {
-        val oc = ray.origin.minus(center)
+        val oc = ray.origin - center
         val a = ray.direction.lengthSquared()
-        val h = Vector.dotProduct(ray.direction, oc.negate())
+        val h = Vector.dotProduct(ray.direction, -oc)
         val c = oc.lengthSquared() - radius * radius
         val discriminant = h * h - a * c
         if (discriminant < 0) return null
@@ -23,7 +23,7 @@ class Sphere(val center: Point, val radius: Float, val material: Material) : Hit
             if (!rayT.surrounds(root)) return null
         }
         val hitpoint = ray.at(root)
-        val outwardNormal = hitpoint.minus(center).divide(radius)
+        val outwardNormal = (hitpoint - center) / radius
         return Hit(ray, hitpoint, outwardNormal, material, root)
     }
 }
