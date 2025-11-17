@@ -48,7 +48,7 @@ fun randomWorld(): HittableList {
             val center = Point(a + 0.9f * rand(), 0.2f, b + 0.9f * rand())
             if ((center - Point(4.0f, 0.2f, 0.0f)).length() > 0.9f) {
                 if (chooseMat < 0.8f) {
-                    val albedo = randomColor().multiply(randomColor())
+                    val albedo = randomColor() * randomColor()
                     worldObjects.add(Sphere(center, 0.2f, Lambertian(albedo)))
                 } else if (chooseMat < 0.95f) {
                     val albedo = randomColor(0.5f, 1.0f)

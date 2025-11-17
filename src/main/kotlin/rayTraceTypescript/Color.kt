@@ -24,11 +24,14 @@ class Color(val r: Float, val g: Float, val b: Float) {
     private fun lineatToGammaColor(linear: Float): Float =
         if (linear > 0.0f) sqrt(linear) else 0.0f
 
-    fun plus(other: Color): Color = Color(r + other.r, g + other.g, b + other.b)
-    fun minus(other: Color): Color = Color(r - other.r, g - other.g, b - other.b)
-    fun scale(s: Float): Color = Color(r*s, g*s, b*s)
-    fun divide(s: Float): Color = Color(r/s, g/s, b/s)
-    fun multiply(other: Color): Color = Color(r*other.r, g*other.g, b*other.b)
+    operator fun plus(other: Color): Color = Color(r + other.r, g + other.g, b + other.b)
+    operator fun minus(other: Color): Color = Color(r - other.r, g - other.g, b - other.b)
+    fun scale(s: Float): Color = Color(r * s, g * s, b * s)
+    operator fun times(s: Float): Color = scale(s)
+    fun divide(s: Float): Color = Color(r / s, g / s, b / s)
+    operator fun div(s: Float): Color = divide(s)
+    fun multiply(other: Color): Color = Color(r * other.r, g * other.g, b * other.b)
+    operator fun times(other: Color): Color = multiply(other)
 
     fun length(): Float = sqrt(r*r + g*g + b*b)
     fun unit(): Color = divide(length())
@@ -40,9 +43,3 @@ class Color(val r: Float, val g: Float, val b: Float) {
         @JvmStatic fun dotProduct(u: Color, v: Color): Float = u.r*v.r + u.g*v.g + u.b*v.b
     }
 }
-
-operator fun Color.plus(other: Color): Color = this.plus(other)
-operator fun Color.minus(other: Color): Color = this.minus(other)
-operator fun Color.times(s: Float): Color = this.scale(s)
-operator fun Color.times(other: Color): Color = this.multiply(other)
-operator fun Color.div(s: Float): Color = this.divide(s)

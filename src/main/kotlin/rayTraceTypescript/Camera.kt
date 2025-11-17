@@ -54,9 +54,9 @@ class Camera {
                 repeat(samplesPerPixel) {
                     val ray = getRay(x.toFloat(), y.toFloat())
                     val sampleColor = rayColor(ray, maxReflectionDepth, world)
-                    pixelColor = pixelColor.plus(sampleColor)
+                    pixelColor += sampleColor
                 }
-                pixelColor = pixelColor.scale(pixelSamplesScale)
+                pixelColor *= pixelSamplesScale
                 sb.append("${pixelColor.colorR()} ${pixelColor.colorG()} ${pixelColor.colorB()}\n")
 
                 // Progress like in TS: integer percent, print only when it increases
@@ -90,16 +90,16 @@ class Camera {
             val scatteredResult = hit.material.scatter(ray, hit)
             if (scatteredResult != null) {
                 val rec = rayColor(scatteredResult.scattered, reflectionDepth - 1, world)
-                return rec.multiply(scatteredResult.albedo)
+                return rec * scatteredResult.albedo
             }
             return Color(0.0f, 0.0f, 0.0f)
         }
 
         val unitDirection = ray.direction.unit()
         val alpha = 0.5f * (unitDirection.y + 1.0f)
-        val white = Color(1.0f, 1.0f, 1.0f).scale(1.0f - alpha)
-        val blue = Color(0.5f, 0.7f, 1.0f).scale(alpha)
-        return white.plus(blue)
+        val white = Color(1.0f, 1.0f, 1.0f) * (1.0f - alpha)
+        val blue = Color(0.5f, 0.7f, 1.0f) * alpha
+        return white + blue
     }
 
     fun getRay(x: Float, y: Float): Ray {
