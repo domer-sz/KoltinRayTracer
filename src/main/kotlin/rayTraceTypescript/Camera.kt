@@ -13,6 +13,10 @@ import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
 import java.nio.charset.StandardCharsets
+import java.util.concurrent.Callable
+import java.util.concurrent.Executors
+import java.util.concurrent.Future
+import java.util.concurrent.atomic.AtomicInteger
 import rayTraceTypescript.utils.RandomSource
 
 class Camera {
@@ -40,46 +44,68 @@ class Camera {
 
     fun render(world: HittableList, outputPath: Path = Paths.get("image.ppm")) {
         initialize()
-
         val header = "P3\n${imageWidth} ${imageHeight}\n255\n"
-        val sb = StringBuilder(header)
-
-        val totalPixels = imageWidth * imageHeight
-        var progress = 0
+        val rows = Array(imageHeight) { "" }
+        val progressPixels = AtomicInteger(0)
+        val progressLock = Any()
         var lastPct = -1
 
-        for (y in 0 until imageHeight) {
-            for (x in 0 until imageWidth) {
-                var pixelColor = Color(0.0f, 0.0f, 0.0f)
-                repeat(samplesPerPixel) {
-                    val ray = getRay(x.toFloat(), y.toFloat())
-                    val sampleColor = rayColor(ray, maxReflectionDepth, world)
-                    pixelColor += sampleColor
-                }
-                pixelColor *= pixelSamplesScale
-                sb.append("${pixelColor.colorR()} ${pixelColor.colorG()} ${pixelColor.colorB()}\n")
-
-                // Progress like in TS: integer percent, print only when it increases
-                progress += 1
-                val pct = (progress * 100) / totalPixels
-                if (pct > lastPct) {
-                    val barWidth = 40
-                    val filled = (pct * barWidth) / 100
-                    val bar = buildString {
-                        append('[')
-                        repeat(filled) { append('#') }
-                        repeat(barWidth - filled) { append('.') }
-                        append(']')
+        fun updateProgress(pixels: Int) {
+            val newTotal = progressPixels.addAndGet(pixels)
+            val pct = (newTotal * 100) / (imageWidth * imageHeight)
+            if (pct > lastPct) {
+                synchronized(progressLock) {
+                    if (pct > lastPct) {
+                        val barWidth = 40
+                        val filled = (pct * barWidth) / 100
+                        val bar = buildString {
+                            append('[')
+                            repeat(filled) { append('#') }
+                            repeat(barWidth - filled) { append('.') }
+                            append(']')
+                        }
+                        print("\r$bar $pct%")
+                        System.out.flush()
+                        lastPct = if (pct < 100) pct else 100
                     }
-                    print("\r$bar $pct%")
-                    System.out.flush()
-                    lastPct = if (pct < 100) pct else 100
                 }
             }
         }
 
+        val threads = Runtime.getRuntime().availableProcessors().coerceAtLeast(1)
+        val executor = Executors.newFixedThreadPool(threads)
+        val tasks = mutableListOf<Future<*>>()
+        for (y in 0 until imageHeight) {
+            tasks += executor.submit(Callable {
+                rows[y] = renderRow(y, world)
+                updateProgress(imageWidth)
+            })
+        }
+        tasks.forEach { it.get() }
+        executor.shutdown()
+
+        val sb = StringBuilder(header)
+        rows.forEach { sb.append(it) }
         Files.write(outputPath, sb.toString().toByteArray(StandardCharsets.UTF_8))
         println("\r[" + "#".repeat(40) + "] 100%")
+    }
+
+    private fun renderRow(y: Int, world: HittableList): String {
+        val rowBuilder = StringBuilder(imageWidth * 12)
+        for (x in 0 until imageWidth) {
+            var pixelColor = Color(0.0f, 0.0f, 0.0f)
+            repeat(samplesPerPixel) { sampleIndex ->
+                val seed = sampleSeed(x, y, sampleIndex)
+                val sampleColor = RandomSource.scoped(seed) {
+                    val ray = getRay(x.toFloat(), y.toFloat())
+                    rayColor(ray, maxReflectionDepth, world)
+                }
+                pixelColor = pixelColor.plus(sampleColor)
+            }
+            pixelColor = pixelColor.scale(pixelSamplesScale)
+            rowBuilder.append("${pixelColor.colorR()} ${pixelColor.colorG()} ${pixelColor.colorB()}\n")
+        }
+        return rowBuilder.toString()
     }
 
     private fun rayColor(ray: Ray, reflectionDepth: Int, world: HittableList): Color {
@@ -90,16 +116,16 @@ class Camera {
             val scatteredResult = hit.material.scatter(ray, hit)
             if (scatteredResult != null) {
                 val rec = rayColor(scatteredResult.scattered, reflectionDepth - 1, world)
-                return rec * scatteredResult.albedo
+                return rec.multiply(scatteredResult.albedo)
             }
             return Color(0.0f, 0.0f, 0.0f)
         }
 
         val unitDirection = ray.direction.unit()
         val alpha = 0.5f * (unitDirection.y + 1.0f)
-        val white = Color(1.0f, 1.0f, 1.0f) * (1.0f - alpha)
-        val blue = Color(0.5f, 0.7f, 1.0f) * alpha
-        return white + blue
+        val white = Color(1.0f, 1.0f, 1.0f).scale(1.0f - alpha)
+        val blue = Color(0.5f, 0.7f, 1.0f).scale(alpha)
+        return white.plus(blue)
     }
 
     fun getRay(x: Float, y: Float): Ray {
@@ -110,7 +136,7 @@ class Camera {
             pixel00.z + pixelDeltaU.z * (x + offset.x) + pixelDeltaV.z * (y + offset.y)
         )
         val rayOrigin = if (defocusAngle <= 0.0f) cameraCenter else defocusDiskSample()
-        val rayDirection = pixelSample - rayOrigin
+        val rayDirection = pixelSample.minus(rayOrigin)
         return Ray(rayOrigin, rayDirection)
     }
 
@@ -138,19 +164,19 @@ class Camera {
         val viewportHeight = 2.0f * h * focusDistance
         val viewportWidth = viewportHeight * (imageWidth.toFloat() / imageHeight.toFloat())
 
-        val w = Vector.unit(lookFrom - lookAt)
+        val w = Vector.unit(lookFrom.minus(lookAt))
         val u = Vector.unit(Vector.cross(vUp, w))
         val v = Vector.cross(w, u)
 
-        val viewportU = u * viewportWidth
-        val viewportV = (-v) * viewportHeight
+        val viewportU = u.scale(viewportWidth)
+        val viewportV = v.negate().scale(viewportHeight)
 
-        pixelDeltaU = viewportU / imageWidth.toFloat()
-        pixelDeltaV = viewportV / imageHeight.toFloat()
+        pixelDeltaU = viewportU.divide(imageWidth.toFloat())
+        pixelDeltaV = viewportV.divide(imageHeight.toFloat())
 
-        val viewportCorner = cameraCenter - w * focusDistance
-        val viewportUpperLeftShiftedU = viewportCorner - (viewportU / 2.0f)
-        val viewportUpperLeft = viewportUpperLeftShiftedU - (viewportV / 2.0f)
+        val viewportUpperLeft = cameraCenter.minus(w.scale(focusDistance))
+            .minus(viewportU.divide(2.0f))
+            .minus(viewportV.divide(2.0f))
 
         pixel00 = Point(
             viewportUpperLeft.x + pixelDeltaU.x * 0.5f + pixelDeltaV.x * 0.5f,
@@ -160,7 +186,27 @@ class Camera {
 
         val defocusRadius =
             focusDistance * tan((degreesToRadians(defocusAngle) / 2.0f).toDouble()).toFloat()
-        defocusDiscU = u * defocusRadius
-        defocusDiscV = v * defocusRadius
+        defocusDiscU = u.scale(defocusRadius)
+        defocusDiscV = v.scale(defocusRadius)
+    }
+
+    private fun sampleSeed(x: Int, y: Int, sampleIndex: Int): Long? {
+        val baseSeed = RandomSource.deterministicSeedValue() ?: return null
+        var seed = baseSeed
+        seed = seed xor (x.toLong() shl 32)
+        seed = seed xor (y.toLong() shl 16)
+        seed = seed xor sampleIndex.toLong()
+        seed = mixSeed(seed)
+        return seed
+    }
+
+    private fun mixSeed(value: Long): Long {
+        var z = value
+        z = z xor (z ushr 33)
+        z *= -0x00AE502812AA7333L  // 0xff51afd7ed558ccd
+        z = z xor (z ushr 33)
+        z *= -0x013203AC9E1B211DL  // 0xc4ceb9fe1a85ec53
+        z = z xor (z ushr 33)
+        return z
     }
 }

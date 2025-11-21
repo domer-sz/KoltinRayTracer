@@ -3,17 +3,36 @@ package rayTraceTypescript.utils
 import kotlin.random.Random
 
 object RandomSource {
-    private var rng: Random = Random.Default
+    private val threadLocal: ThreadLocal<Random> = ThreadLocal.withInitial { Random.Default }
+    private var deterministicSeed: Long? = null
 
     fun withSeed(seed: Long) {
-        rng = Random(seed)
+        deterministicSeed = seed
+        threadLocal.set(Random(seed))
     }
 
     fun reset() {
-        rng = Random.Default
+        deterministicSeed = null
+        threadLocal.set(Random.Default)
     }
 
-    fun nextFloat(): Float = rng.nextFloat()
+    fun nextFloat(): Float = threadLocal.get().nextFloat()
 
-    fun nextFloat(min: Float, max: Float): Float = rng.nextFloat() * (max - min) + min
+    fun nextFloat(min: Float, max: Float): Float =
+        threadLocal.get().nextFloat() * (max - min) + min
+
+    fun isDeterministic(): Boolean = deterministicSeed != null
+
+    fun deterministicSeedValue(): Long? = deterministicSeed
+
+    fun <T> scoped(seed: Long?, block: () -> T): T {
+        if (seed == null) return block()
+        val previous = threadLocal.get()
+        threadLocal.set(Random(seed))
+        return try {
+            block()
+        } finally {
+            threadLocal.set(previous)
+        }
+    }
 }
