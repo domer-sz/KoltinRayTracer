@@ -59,7 +59,6 @@ class Camera {
                 pixelColor *= pixelSamplesScale
                 sb.append("${pixelColor.colorR()} ${pixelColor.colorG()} ${pixelColor.colorB()}\n")
 
-                // Progress like in TS: integer percent, print only when it increases
                 progress += 1
                 val pct = (progress * 100) / totalPixels
                 if (pct > lastPct) {
