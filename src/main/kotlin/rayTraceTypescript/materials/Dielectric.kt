@@ -25,7 +25,7 @@ class Dielectric(val ri: Float) : Material {
         else
             Vector.Companion.refract(unitDirection, hit.normal, refractionRatio)
 
-        val scattered = Ray(hit.point, direction)
+        val scattered = Ray(hit.point, direction, rayIn.time)
         return ScatteredResult(attenuation, scattered)
     }
 

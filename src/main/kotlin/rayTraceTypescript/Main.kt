@@ -9,13 +9,14 @@ import rayTraceTypescript.objects.Sphere
 import rayTraceTypescript.utils.randomFloat
 
 fun main() {
-    val world: HittableList = prepareWorld()
+//    val world: HittableList = prepareWorld()
+    val world: HittableList = randomWorld()
     val camera = Camera()
 
     camera.aspectRatio = 16.0f / 9.0f
     camera.imageWidth = 300
-    camera.samplesPerPixel = 50
-    camera.maxReflectionDepth = 45
+    camera.maxReflectionDepth = 10
+    camera.samplesPerPixel = 10
 
     camera.vfov = 20.0f
     camera.lookFrom = Point(13.0f, 2.0f, 3.0f)
@@ -49,7 +50,8 @@ fun randomWorld(): HittableList {
             if ((center - Point(4.0f, 0.2f, 0.0f)).length() > 0.9f) {
                 if (chooseMat < 0.8f) {
                     val albedo = randomColor() * randomColor()
-                    worldObjects.add(Sphere(center, 0.2f, Lambertian(albedo)))
+                    val center2: Point = center + Point(0f, randRange(0f, 0.5f), 0f)
+                    worldObjects.add(Sphere(center, center2, 0.2f, Lambertian(albedo)))
                 } else if (chooseMat < 0.95f) {
                     val albedo = randomColor(0.5f, 1.0f)
                     val fuzz = randRange(0.0f, 0.5f)
