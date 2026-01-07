@@ -14,6 +14,7 @@ import java.nio.file.Path
 import java.nio.file.Paths
 import java.nio.charset.StandardCharsets
 import rayTraceTypescript.utils.RandomSource
+import rayTraceTypescript.utils.randomFloat
 
 class Camera {
     var aspectRatio: Float = 16.0f / 9.0f
@@ -110,7 +111,8 @@ class Camera {
         )
         val rayOrigin = if (defocusAngle <= 0.0f) cameraCenter else defocusDiskSample()
         val rayDirection = pixelSample - rayOrigin
-        return Ray(rayOrigin, rayDirection)
+        val rayTime = randomFloat(0.0F, 1.0F) //random ray time: TODO: simulate real time
+        return Ray(rayOrigin, rayDirection, rayTime)
     }
 
     fun sampleSquare(): Vector =

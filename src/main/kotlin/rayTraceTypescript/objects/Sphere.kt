@@ -7,10 +7,14 @@ import rayTraceTypescript.Vector
 import rayTraceTypescript.materials.Material
 import kotlin.math.sqrt
 
-class Sphere(val center: Point, val radius: Float, val material: Material) : Hittable {
-    constructor(center: Point, radius: Double, material: Material) : this(center, radius.toFloat(), material)
+class Sphere  constructor(val center: Ray, val radius: Float, val material: Material) : Hittable {
+
+    //static sphere
+    constructor(center: Point, radius: Float, material: Material) : this(Ray(center, Vector(0.0, 0.0, 0.0)), radius, material)
+    constructor(center: Point, radius: Double, material: Material) : this(Ray(center, Vector(0.0, 0.0, 0.0)), radius.toFloat(), material)
+
     override fun hit(ray: Ray, rayT: Interval): Hit? {
-        val oc = ray.origin - center
+        val oc = ray.origin - center.origin
         val a = ray.direction.lengthSquared()
         val h = Vector.dotProduct(ray.direction, -oc)
         val c = oc.lengthSquared() - radius * radius
@@ -23,7 +27,7 @@ class Sphere(val center: Point, val radius: Float, val material: Material) : Hit
             if (!rayT.surrounds(root)) return null
         }
         val hitpoint = ray.at(root)
-        val outwardNormal = (hitpoint - center) / radius
+        val outwardNormal = (hitpoint - center.origin) / radius
         return Hit(ray, hitpoint, outwardNormal, material, root)
     }
 }

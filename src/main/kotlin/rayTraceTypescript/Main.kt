@@ -34,7 +34,7 @@ fun randomWorld(): HittableList {
     val worldObjects: MutableList<Hittable> = mutableListOf()
 
     val groundMaterial = Lambertian(Color(0.5f, 0.5f, 0.5f))
-    val groundSphere = Sphere(Point(0.0f, -1000.0f, 0.0f), 1000.0, groundMaterial)
+    val groundSphere = Sphere(Point(0.0f, -1000.0f, 0.0f), 1000.0F, groundMaterial)
     worldObjects.add(groundSphere)
 
     fun rand() = randomFloat(0.0f, 1.0f)
