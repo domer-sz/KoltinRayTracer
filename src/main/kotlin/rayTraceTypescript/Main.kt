@@ -14,9 +14,9 @@ fun main() {
     val camera = Camera()
 
     camera.aspectRatio = 16.0f / 9.0f
-    camera.imageWidth = 300
-    camera.maxReflectionDepth = 10
-    camera.samplesPerPixel = 10
+    camera.imageWidth = 1800
+    camera.maxReflectionDepth = 20
+    camera.samplesPerPixel = 190
 
     camera.vfov = 20.0f
     camera.lookFrom = Point(13.0f, 2.0f, 3.0f)
