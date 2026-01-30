@@ -1,0 +1,4 @@
+package rayTraceTypescript
+
+class Aabb {
+}

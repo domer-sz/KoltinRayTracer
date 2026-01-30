@@ -8,4 +8,9 @@ class Interval(val min: Float, val max: Float) {
         x > max -> max
         else -> x
     }
+
+    fun expand(delta: Float): Interval {
+        val padding = delta/2
+        return Interval(min - padding, max + padding)
+    }
 }
