@@ -5,4 +5,5 @@ import rayTraceTypescript.Ray
 
 interface Hittable {
     fun hit(ray: Ray, rayT: Interval): Hit?
+    fun aabbBoundingBox(): Float = 0F;
 }

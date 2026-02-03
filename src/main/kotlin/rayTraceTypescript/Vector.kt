@@ -29,6 +29,17 @@ open class Vector(val x: Float, val y: Float, val z: Float) {
 
     override fun toString(): String = "$" + "x $" + "y $" + "z"
 
+    operator fun get(i: Int): Float = when (i) {
+        0 -> x
+        1 -> y
+        2 -> z
+        else -> throw IndexOutOfBoundsException("Vector index $i")
+    }
+
+    fun toPoint(): Point {
+        return Point(x, y, z)
+    }
+
     companion object {
         @JvmStatic
         fun dotProduct(u: Vector, v: Vector): Float = u.x * v.x + u.y * v.y + u.z * v.z

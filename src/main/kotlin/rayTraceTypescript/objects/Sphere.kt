@@ -1,5 +1,6 @@
 package rayTraceTypescript.objects
 
+import rayTraceTypescript.Aabb
 import rayTraceTypescript.Interval
 import rayTraceTypescript.Point
 import rayTraceTypescript.Ray
@@ -7,20 +8,31 @@ import rayTraceTypescript.Vector
 import rayTraceTypescript.materials.Material
 import kotlin.math.sqrt
 
-class Sphere  constructor(val center: Ray, val radius: Float, val material: Material) : Hittable {
+class Sphere constructor(val center: Ray, val radius: Float, val material: Material) : Hittable {
+
+    private lateinit var bbox: Aabb
 
     //static sphere
-    constructor(center: Point, radius: Float, material: Material) : this(Ray(center, Vector(0.0, 0.0, 0.0)), radius, material)
-    constructor(center: Point, radius: Double, material: Material) : this(Ray(center, Vector(0.0, 0.0, 0.0)), radius.toFloat(), material)
+    constructor(center: Point, radius: Float, material: Material) : this(Ray(center, Vector(0.0, 0.0, 0.0)), radius, material) {
+        val rvec = Vector(radius, radius, radius)
+        this.bbox = Aabb.fromPoints((center - rvec).toPoint(), (center + rvec).toPoint())
+    }
+    constructor(center: Point, radius: Double, material: Material) : this(Ray(center, Vector(0.0, 0.0, 0.0)), radius.toFloat(), material) {
+        val rvec = Vector(radius, radius, radius)
+        this.bbox = Aabb.fromPoints((center - rvec).toPoint(), (center + rvec).toPoint())
+    }
 
     //dynamic sphere
-    constructor(center1: Point, center2: Point, radius: Float, material: Material) : this(Ray(center1, center2 - center1), radius, material)
+    constructor(center1: Point, center2: Point, radius: Float, material: Material) : this(Ray(center1, center2 - center1), radius, material) {
+        val rvec = Vector(radius, radius, radius)
+        val box1 = Aabb.fromPoints((center.at(0F) - rvec).toPoint(), (center.at(0F) + rvec).toPoint())
+        val box2 = Aabb.fromPoints((center.at(1F) - rvec).toPoint(), (center.at(1F) + rvec).toPoint())
+        this.bbox = Aabb(box1, box2)
+    }
     constructor(center1: Point, center2: Point, radius: Double, material: Material) : this(Ray(center1, center2 - center1), radius.toFloat(), material)
-
 
     override fun hit(ray: Ray, rayT: Interval): Hit? {
         val currentCenter = center.at(ray.time)
-//        val oc = ray.origin - center.origin
         val oc =  ray.origin - currentCenter
         val a = ray.direction.lengthSquared()
         val h = Vector.dotProduct(ray.direction, -oc)
@@ -34,8 +46,9 @@ class Sphere  constructor(val center: Ray, val radius: Float, val material: Mate
             if (!rayT.surrounds(root)) return null
         }
         val hitpoint = ray.at(root)
-//        val outwardNormal = (hitpoint - center.origin) / radius
         val outwardNormal = (hitpoint - currentCenter) / radius
         return Hit(ray, hitpoint, outwardNormal, material, root)
     }
+
+    fun boundingBox(): Aabb = this.bbox
 }

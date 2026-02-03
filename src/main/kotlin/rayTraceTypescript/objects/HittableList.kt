@@ -1,9 +1,12 @@
 package rayTraceTypescript.objects
 
+import rayTraceTypescript.Aabb
 import rayTraceTypescript.Interval
 import rayTraceTypescript.Ray
 
-class HittableList(val objects: MutableList<Hittable>) : Hittable {
+class HittableList(val objects: MutableList<Hittable>, val bbox: Aabb) : Hittable {
+
+
     override fun hit(ray: Ray, rayT: Interval): Hit? {
         var hit: Hit? = null
         var closestSoFar = rayT.max
