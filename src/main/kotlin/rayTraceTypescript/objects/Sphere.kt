@@ -50,5 +50,5 @@ class Sphere constructor(val center: Ray, val radius: Float, val material: Mater
         return Hit(ray, hitpoint, outwardNormal, material, root)
     }
 
-    fun boundingBox(): Aabb = this.bbox
+    override fun aabbBoundingBox(): Aabb = this.bbox
 }

@@ -3,6 +3,7 @@ package rayTraceTypescript
 import rayTraceTypescript.materials.Dielectric
 import rayTraceTypescript.materials.Lambertian
 import rayTraceTypescript.materials.Metal
+import rayTraceTypescript.objects.BvhNode
 import rayTraceTypescript.objects.Hittable
 import rayTraceTypescript.objects.HittableList
 import rayTraceTypescript.objects.Sphere
@@ -10,11 +11,11 @@ import rayTraceTypescript.utils.randomFloat
 
 fun main() {
 //    val world: HittableList = prepareWorld()
-    val world: HittableList = randomWorld()
+    val world = HittableList(mutableListOf(BvhNode(randomWorld())))
     val camera = Camera()
 
     camera.aspectRatio = 16.0f / 9.0f
-    camera.imageWidth = 1800
+    camera.imageWidth = 800
     camera.maxReflectionDepth = 20
     camera.samplesPerPixel = 190
 
