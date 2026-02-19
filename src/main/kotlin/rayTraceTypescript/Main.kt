@@ -8,16 +8,16 @@ import rayTraceTypescript.objects.Hittable
 import rayTraceTypescript.objects.HittableList
 import rayTraceTypescript.objects.Sphere
 import rayTraceTypescript.utils.randomFloat
+import kotlin.system.measureTimeMillis
 
 fun main() {
-//    val world: HittableList = prepareWorld()
-    val world = HittableList(mutableListOf(BvhNode(randomWorld())))
+    val bvhWorld = HittableList(mutableListOf(BvhNode(randomWorld())))
     val camera = Camera()
 
     camera.aspectRatio = 16.0f / 9.0f
-    camera.imageWidth = 800
+    camera.imageWidth = 500
     camera.maxReflectionDepth = 20
-    camera.samplesPerPixel = 190
+    camera.samplesPerPixel = 90
 
     camera.vfov = 20.0f
     camera.lookFrom = Point(13.0f, 2.0f, 3.0f)
@@ -27,7 +27,11 @@ fun main() {
     camera.defocusAngle = 0.6f
     camera.focusDistance = 10.0f
 
-    camera.render(world)
+
+    val time = measureTimeMillis {
+        camera.render(bvhWorld)
+    }
+    println("Execution time: ${formatDuration(time)} ms")
 }
 
 fun prepareWorld(): HittableList = WorldData.hardcodedWorld()
@@ -68,4 +72,12 @@ fun randomWorld(): HittableList {
     worldObjects.add(Sphere(Point(-4.0f, 1.0f, 0.0f), 1.0f, Lambertian(Color(0.4f, 0.2f, 0.1f))))
     worldObjects.add(Sphere(Point(4.0f, 1.0f, 0.0f), 1.0f, Metal(Color(0.7f, 0.6f, 0.5f), 0.0f)))
     return HittableList(worldObjects)
+}
+
+fun formatDuration(ms: Long): String {
+    val minutes = ms / 60000
+    val seconds = (ms % 60000) / 1000
+    val millis = ms % 1000
+
+    return "%02d:%02d.%03d".format(minutes, seconds, millis)
 }
