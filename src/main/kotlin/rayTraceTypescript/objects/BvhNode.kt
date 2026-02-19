@@ -9,18 +9,25 @@ class BvhNode : Hittable {
 
     private val left: Hittable
     private val right: Hittable
-    private val bbox: Aabb
+    private lateinit var bbox: Aabb
 
     constructor(list: HittableList) : this(list.objects, 0, list.objects.size)
 
 
     constructor(objects: MutableList<Hittable>, start: Int, end: Int) {
-        val axis = Random.nextInt(0, 3) // 0..2
+        // Build the bounding box of the span of source objects.
+        var bbox = Aabb()
+        for (i in start until end) {
+            bbox = Aabb(bbox, objects[i].aabbBoundingBox())
+        }
+
+        val axis = bbox.longestAxis()
+
 
         val comparator: Comparator<Hittable> = when (axis) {
-            0 -> compareBy { it.aabbBoundingBox().x.min } // equivalent to box_x_compare
-            1 -> compareBy { it.aabbBoundingBox().y.min } // equivalent to box_y_compare
-            else -> compareBy { it.aabbBoundingBox().z.min } // equivalent to box_z_compare
+            0 -> compareBy { it.aabbBoundingBox().x.min }
+            1 -> compareBy { it.aabbBoundingBox().y.min }
+            else -> compareBy { it.aabbBoundingBox().z.min }
         }
 
         val objectSpan = end - start
@@ -41,7 +48,7 @@ class BvhNode : Hittable {
             right = BvhNode(objects, mid, end)
         }
 
-        bbox = Aabb(left.aabbBoundingBox(), right.aabbBoundingBox())
+        this.bbox = Aabb(left.aabbBoundingBox(), right.aabbBoundingBox())
     }
 
     override fun hit(ray: Ray, rayT: Interval): Hit? {

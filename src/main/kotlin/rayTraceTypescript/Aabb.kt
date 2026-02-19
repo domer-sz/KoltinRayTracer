@@ -27,6 +27,18 @@ data class Aabb(
         else -> x
     }
 
+    fun longestAxis(): Int {
+        val xSize = x.size()
+        val ySize = y.size()
+        val zSize = z.size()
+
+        return if (xSize > ySize) {
+            if (xSize > zSize) 0 else 2
+        } else {
+            if (ySize > zSize) 1 else 2
+        }
+    }
+
     fun hit(r: Ray, rayT: Interval): Boolean {
         val rayOrig = r.origin
         val rayDir = r.direction

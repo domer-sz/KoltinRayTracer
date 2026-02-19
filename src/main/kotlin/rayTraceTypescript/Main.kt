@@ -33,12 +33,6 @@ fun main() {
         numberOfRays = camera.render(bvhWorld)
     }
     printRenderReport(time, numberOfRays)
-
-    var numberOfRays2: Long = 0
-    val time2 = measureTimeMillis {
-        numberOfRays2 = camera.render(bvhWorld)
-    }
-    printRenderReport(time2, numberOfRays2)
 }
 
 private fun printRenderReport(time: Long, numberOfRays: Long) {

@@ -20,6 +20,8 @@ class Interval(val min: Float, val max: Float) {
         return Interval(min - padding, max + padding)
     }
 
+    fun size(): Float = max - min
+
     companion object {
         val EMPTY = Interval(
             Float.POSITIVE_INFINITY,
