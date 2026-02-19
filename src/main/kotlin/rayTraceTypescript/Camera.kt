@@ -39,13 +39,14 @@ class Camera {
     private lateinit var defocusDiscU: Vector
     private lateinit var defocusDiscV: Vector
 
-    fun render(world: HittableList, outputPath: Path = Paths.get("image.ppm")) {
+    fun render(world: HittableList, outputPath: Path = Paths.get("image.ppm")): Long {
         initialize()
 
         val header = "P3\n${imageWidth} ${imageHeight}\n255\n"
         val sb = StringBuilder(header)
 
         val totalPixels = imageWidth * imageHeight
+        var numberOfRays: Long = 0
         var progress = 0
         var lastPct = -1
 
@@ -53,6 +54,7 @@ class Camera {
             for (x in 0 until imageWidth) {
                 var pixelColor = Color(0.0f, 0.0f, 0.0f)
                 repeat(samplesPerPixel) {
+                    numberOfRays++
                     val ray = getRay(x.toFloat(), y.toFloat())
                     val sampleColor = rayColor(ray, maxReflectionDepth, world)
                     pixelColor += sampleColor
@@ -80,6 +82,7 @@ class Camera {
 
         Files.write(outputPath, sb.toString().toByteArray(StandardCharsets.UTF_8))
         println("\r[" + "#".repeat(40) + "] 100%")
+        return numberOfRays;
     }
 
     private fun rayColor(ray: Ray, reflectionDepth: Int, world: HittableList): Color {

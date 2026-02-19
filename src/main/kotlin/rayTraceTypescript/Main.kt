@@ -9,6 +9,7 @@ import rayTraceTypescript.objects.HittableList
 import rayTraceTypescript.objects.Sphere
 import rayTraceTypescript.utils.randomFloat
 import kotlin.system.measureTimeMillis
+import kotlin.time.Duration
 
 fun main() {
     val bvhWorld = HittableList(mutableListOf(BvhNode(randomWorld())))
@@ -27,11 +28,27 @@ fun main() {
     camera.defocusAngle = 0.6f
     camera.focusDistance = 10.0f
 
-
+    var numberOfRays: Long = 0
     val time = measureTimeMillis {
-        camera.render(bvhWorld)
+        numberOfRays = camera.render(bvhWorld)
     }
-    println("Execution time: ${formatDuration(time)} ms")
+    printRenderReport(time, numberOfRays)
+
+    var numberOfRays2: Long = 0
+    val time2 = measureTimeMillis {
+        numberOfRays2 = camera.render(bvhWorld)
+    }
+    printRenderReport(time2, numberOfRays2)
+}
+
+private fun printRenderReport(time: Long, numberOfRays: Long) {
+    println("Execution time: ${formatDuration(time)}")
+    println("Number of rays: ${numberOfRays.toHumanReadable()}")
+    println(
+        "Number of rays per second: ${
+            (numberOfRays / java.time.Duration.ofMillis(time).toSeconds()).toHumanReadable()
+        }"
+    )
 }
 
 fun prepareWorld(): HittableList = WorldData.hardcodedWorld()
@@ -80,4 +97,16 @@ fun formatDuration(ms: Long): String {
     val millis = ms % 1000
 
     return "%02d:%02d.%03d".format(minutes, seconds, millis)
+}
+
+
+fun Long.toHumanReadable(): String {
+    val abs = kotlin.math.abs(this)
+
+    return when {
+        abs >= 1_000_000_000 -> "%.1fB".format(this / 1_000_000_000.0)
+        abs >= 1_000_000     -> "%.1fM".format(this / 1_000_000.0)
+        abs >= 1_000         -> "%.1fK".format(this / 1_000.0)
+        else -> this.toString()
+    }
 }
