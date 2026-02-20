@@ -13,7 +13,7 @@ import java.nio.charset.StandardCharsets
 import rayTraceTypescript.utils.RandomSource
 import rayTraceTypescript.utils.randomFloat
 import rayTraceTypescript.objects.Hit
-import rayTraceTypescript.materials.ScatteredResult
+import kotlin.math.min
 
 class Camera {
     var aspectRatio: Float = 16.0f / 9.0f
@@ -28,6 +28,7 @@ class Camera {
 
     var defocusAngle: Float = 0.0f
     var focusDistance: Float = 10.0f
+    var showProgress: Boolean = false
 
     private var imageHeight: Int = 0
     private var pixelSamplesScale: Float = 1.0f
@@ -37,19 +38,33 @@ class Camera {
     private lateinit var pixel00: Point
     private lateinit var defocusDiscU: Vector
     private lateinit var defocusDiscV: Vector
+    private lateinit var pixelBaseX: FloatArray
+    private lateinit var pixelBaseY: FloatArray
+    private lateinit var pixelBaseZ: FloatArray
+    private lateinit var rowBaseX: FloatArray
+    private lateinit var rowBaseY: FloatArray
+    private lateinit var rowBaseZ: FloatArray
     private lateinit var tracePool: TracePool
     private lateinit var progressFrames: Array<String>
 
-    fun render(world: HittableList, outputPath: Path = Paths.get("image.ppm")): Long {
+    fun render(
+        world: HittableList,
+        outputPath: Path = Paths.get("image.ppm"),
+        saveOutput: Boolean = true,
+    ): Long {
         initialize()
+        world.prepareForRender()
 
-        val header = "P3\n${imageWidth} ${imageHeight}\n255\n"
-        val estimatedPixelChars = imageWidth * imageHeight * 12
-        val sb = StringBuilder(header.length + estimatedPixelChars)
-        sb.append(header)
+        val sb = if (saveOutput) {
+            val header = "P3\n${imageWidth} ${imageHeight}\n255\n"
+            val estimatedPixelChars = imageWidth * imageHeight * 12
+            StringBuilder(header.length + estimatedPixelChars).apply { append(header) }
+        } else {
+            null
+        }
 
         val totalPixels = imageWidth * imageHeight
-        var numberOfRays: Long = 0
+        val rayCounter = longArrayOf(0L)
         var progress = 0
         var lastPct = -1
 
@@ -58,29 +73,38 @@ class Camera {
                 var pixelR = 0.0f
                 var pixelG = 0.0f
                 var pixelB = 0.0f
-                repeat(samplesPerPixel) {
-                    numberOfRays++
-                    getRay(x.toFloat(), y.toFloat(), tracePool.rays[0], tracePool.sampleOffset, tracePool.defocusOffset)
-                    rayColor(tracePool.rays[0], maxReflectionDepth, world, 0, tracePool)
+                var sample = 0
+                while (sample < samplesPerPixel) {
+                    getRay(x, y, tracePool.rays[0], tracePool.sampleOffset, tracePool.defocusOffset)
+                    rayColor(tracePool.rays[0], maxReflectionDepth, world, 0, tracePool, rayCounter)
                     pixelR += tracePool.colorOut[0]
                     pixelG += tracePool.colorOut[1]
                     pixelB += tracePool.colorOut[2]
+                    sample++
                 }
-                appendColor(sb, pixelR * pixelSamplesScale, pixelG * pixelSamplesScale, pixelB * pixelSamplesScale)
+                if (sb != null) {
+                    appendColor(sb, pixelR * pixelSamplesScale, pixelG * pixelSamplesScale, pixelB * pixelSamplesScale)
+                }
 
-                progress += 1
-                val pct = (progress * 100) / totalPixels
-                if (pct > lastPct) {
-                    print(progressFrames[pct])
-                    System.out.flush()
-                    lastPct = pct
+                if (showProgress) {
+                    progress += 1
+                    val pct = (progress * 100) / totalPixels
+                    if (pct > lastPct) {
+                        print(progressFrames[pct])
+                        System.out.flush()
+                        lastPct = pct
+                    }
                 }
             }
         }
 
-        println()
-        Files.write(outputPath, sb.toString().toByteArray(StandardCharsets.UTF_8))
-        return numberOfRays
+        if (showProgress) {
+            println()
+        }
+        if (sb != null) {
+            Files.write(outputPath, sb.toString().toByteArray(StandardCharsets.UTF_8))
+        }
+        return rayCounter[0]
     }
 
     private fun rayColor(
@@ -89,36 +113,151 @@ class Camera {
         world: HittableList,
         depthIndex: Int,
         tracePool: TracePool,
+        rayCounter: LongArray,
     ) {
-        if (reflectionDepth <= 0) {
-            setBlack(tracePool.colorOut)
-            return
-        }
+        var attenuationR = 1.0f
+        var attenuationG = 1.0f
+        var attenuationB = 1.0f
+        var currentRay = ray
+        var remainingDepth = reflectionDepth
+        var bounceIndex = depthIndex
 
-        val hit = tracePool.hits[depthIndex]
-        if (world.hit(ray, 0.001f, infinity, hit)) {
-            val scatter = tracePool.scatters[depthIndex]
-            if (hit.material.scatter(ray, hit, scatter)) {
-                val nextRay = tracePool.rays[depthIndex + 1]
-                nextRay.copyFrom(scatter.scattered)
-                rayColor(nextRay, reflectionDepth - 1, world, depthIndex + 1, tracePool)
-                tracePool.colorOut[0] *= scatter.albedoR
-                tracePool.colorOut[1] *= scatter.albedoG
-                tracePool.colorOut[2] *= scatter.albedoB
+        while (true) {
+            rayCounter[0] += 1L
+
+            if (remainingDepth <= 0) {
+                setBlack(tracePool.colorOut)
                 return
             }
-            setBlack(tracePool.colorOut)
-            return
-        }
 
-        val dirX = ray.direction.x
-        val dirY = ray.direction.y
-        val dirZ = ray.direction.z
-        val invLen = 1.0f / sqrt(dirX * dirX + dirY * dirY + dirZ * dirZ)
-        val alpha = 0.5f * (dirY * invLen + 1.0f)
-        tracePool.colorOut[0] = 1.0f - 0.5f * alpha
-        tracePool.colorOut[1] = 1.0f - 0.3f * alpha
-        tracePool.colorOut[2] = 1.0f
+            val hit = tracePool.hits[bounceIndex]
+            if (!world.hit(currentRay, 0.001f, infinity, hit)) {
+                val dirX = currentRay.direction.x
+                val dirY = currentRay.direction.y
+                val dirZ = currentRay.direction.z
+                val invLen = 1.0f / sqrt(dirX * dirX + dirY * dirY + dirZ * dirZ)
+                val alpha = 0.5f * (dirY * invLen + 1.0f)
+                val skyR = 1.0f - 0.5f * alpha
+                val skyG = 1.0f - 0.3f * alpha
+                val skyB = 1.0f
+                tracePool.colorOut[0] = skyR * attenuationR
+                tracePool.colorOut[1] = skyG * attenuationG
+                tracePool.colorOut[2] = skyB * attenuationB
+                return
+            }
+
+            val nextRay = tracePool.rays[bounceIndex + 1]
+            val scatterDir = tracePool.scatterDir
+
+            when (hit.materialType) {
+                Hit.MATERIAL_LAMBERTIAN -> {
+                    randomInUnitSphere(scatterDir)
+                    val invScatterLen =
+                        1.0f / sqrt(scatterDir.x * scatterDir.x + scatterDir.y * scatterDir.y + scatterDir.z * scatterDir.z)
+                    scatterDir.set(
+                        scatterDir.x * invScatterLen,
+                        scatterDir.y * invScatterLen,
+                        scatterDir.z * invScatterLen,
+                    )
+                    if (scatterDir.x * hit.normal.x + scatterDir.y * hit.normal.y + scatterDir.z * hit.normal.z < 0.0f) {
+                        scatterDir.set(-scatterDir.x, -scatterDir.y, -scatterDir.z)
+                    }
+                    if (scatterDir.nearZero()) {
+                        scatterDir.set(hit.normal)
+                    }
+                }
+                Hit.MATERIAL_METAL -> {
+                    val dirX = currentRay.direction.x
+                    val dirY = currentRay.direction.y
+                    val dirZ = currentRay.direction.z
+                    val invLen = 1.0f / sqrt(dirX * dirX + dirY * dirY + dirZ * dirZ)
+                    val unitX = dirX * invLen
+                    val unitY = dirY * invLen
+                    val unitZ = dirZ * invLen
+                    val normalX = hit.normal.x
+                    val normalY = hit.normal.y
+                    val normalZ = hit.normal.z
+                    val scale = 2.0f * (unitX * normalX + unitY * normalY + unitZ * normalZ)
+                    tracePool.reflectedDirection.set(
+                        unitX - normalX * scale,
+                        unitY - normalY * scale,
+                        unitZ - normalZ * scale,
+                    )
+                    randomInUnitSphere(tracePool.randomDirection)
+                    scatterDir.set(
+                        tracePool.reflectedDirection.x + tracePool.randomDirection.x * hit.fuzz,
+                        tracePool.reflectedDirection.y + tracePool.randomDirection.y * hit.fuzz,
+                        tracePool.reflectedDirection.z + tracePool.randomDirection.z * hit.fuzz,
+                    )
+                    if (scatterDir.x * normalX + scatterDir.y * normalY + scatterDir.z * normalZ <= 0.0f) {
+                        setBlack(tracePool.colorOut)
+                        return
+                    }
+                }
+                Hit.MATERIAL_DIELECTRIC -> {
+                    val dirX = currentRay.direction.x
+                    val dirY = currentRay.direction.y
+                    val dirZ = currentRay.direction.z
+                    val invLen = 1.0f / sqrt(dirX * dirX + dirY * dirY + dirZ * dirZ)
+                    tracePool.unitDirection.set(dirX * invLen, dirY * invLen, dirZ * invLen)
+
+                    val refractionRatio = if (hit.frontFace) 1.0f / hit.refractiveIndex else hit.refractiveIndex
+                    val normalX = hit.normal.x
+                    val normalY = hit.normal.y
+                    val normalZ = hit.normal.z
+                    val cosTheta = min(
+                        -(tracePool.unitDirection.x * normalX + tracePool.unitDirection.y * normalY + tracePool.unitDirection.z * normalZ),
+                        1.0f
+                    )
+                    val sinTheta = sqrt(1.0f - cosTheta * cosTheta)
+                    val cannotRefract = refractionRatio * sinTheta > 1.0f
+                    val useReflect = cannotRefract || reflectance(cosTheta, refractionRatio) > RandomSource.nextFloat()
+
+                    if (useReflect) {
+                        val scale = 2.0f * (tracePool.unitDirection.x * normalX + tracePool.unitDirection.y * normalY + tracePool.unitDirection.z * normalZ)
+                        scatterDir.set(
+                            tracePool.unitDirection.x - normalX * scale,
+                            tracePool.unitDirection.y - normalY * scale,
+                            tracePool.unitDirection.z - normalZ * scale,
+                        )
+                    } else {
+                        val rOutPerpX = (tracePool.unitDirection.x + normalX * cosTheta) * refractionRatio
+                        val rOutPerpY = (tracePool.unitDirection.y + normalY * cosTheta) * refractionRatio
+                        val rOutPerpZ = (tracePool.unitDirection.z + normalZ * cosTheta) * refractionRatio
+                        val rOutPerpLenSquared =
+                            rOutPerpX * rOutPerpX + rOutPerpY * rOutPerpY + rOutPerpZ * rOutPerpZ
+                        val parallelScale = -sqrt(kotlin.math.abs(1.0f - rOutPerpLenSquared))
+                        scatterDir.set(
+                            rOutPerpX + normalX * parallelScale,
+                            rOutPerpY + normalY * parallelScale,
+                            rOutPerpZ + normalZ * parallelScale,
+                        )
+                    }
+                }
+                else -> {
+                    setBlack(tracePool.colorOut)
+                    return
+                }
+            }
+
+            attenuationR *= hit.albedoR
+            attenuationG *= hit.albedoG
+            attenuationB *= hit.albedoB
+
+            nextRay.set(
+                hit.point.x,
+                hit.point.y,
+                hit.point.z,
+                scatterDir.x,
+                scatterDir.y,
+                scatterDir.z,
+                currentRay.time
+            )
+
+            currentRay = nextRay
+            remainingDepth--
+            bounceIndex++
+        }
     }
 
     fun getRay(x: Float, y: Float): Ray {
@@ -128,18 +267,19 @@ class Camera {
         val ray = Ray(Point(0.0f, 0.0f, 0.0f), Vector(0.0f, 0.0f, 0.0f), 0.0f)
         val sampleOffset = Vector(0.0f, 0.0f, 0.0f)
         val defocusOffset = Vector(0.0f, 0.0f, 0.0f)
-        getRay(x, y, ray, sampleOffset, defocusOffset)
+        getRay(x.toInt(), y.toInt(), ray, sampleOffset, defocusOffset)
         return ray
     }
 
-    private fun getRay(x: Float, y: Float, outRay: Ray, sampleOffset: Vector, defocusOffset: Vector) {
+    private fun getRay(x: Int, y: Int, outRay: Ray, sampleOffset: Vector, defocusOffset: Vector) {
         sampleSquare(sampleOffset)
-        val sampleX = x + sampleOffset.x
-        val sampleY = y + sampleOffset.y
 
-        val pixelSampleX = pixel00.x + pixelDeltaU.x * sampleX + pixelDeltaV.x * sampleY
-        val pixelSampleY = pixel00.y + pixelDeltaU.y * sampleX + pixelDeltaV.y * sampleY
-        val pixelSampleZ = pixel00.z + pixelDeltaU.z * sampleX + pixelDeltaV.z * sampleY
+        val pixelSampleX =
+            pixelBaseX[x] + rowBaseX[y] + pixelDeltaU.x * sampleOffset.x + pixelDeltaV.x * sampleOffset.y
+        val pixelSampleY =
+            pixelBaseY[x] + rowBaseY[y] + pixelDeltaU.y * sampleOffset.x + pixelDeltaV.y * sampleOffset.y
+        val pixelSampleZ =
+            pixelBaseZ[x] + rowBaseZ[y] + pixelDeltaU.z * sampleOffset.x + pixelDeltaV.z * sampleOffset.y
 
         val rayOrigin = outRay.origin
         if (defocusAngle <= 0.0f) {
@@ -212,6 +352,24 @@ class Camera {
         defocusDiscU = u * defocusRadius
         defocusDiscV = v * defocusRadius
 
+        pixelBaseX = FloatArray(imageWidth)
+        pixelBaseY = FloatArray(imageWidth)
+        pixelBaseZ = FloatArray(imageWidth)
+        for (x in 0 until imageWidth) {
+            pixelBaseX[x] = pixel00.x + pixelDeltaU.x * x.toFloat()
+            pixelBaseY[x] = pixel00.y + pixelDeltaU.y * x.toFloat()
+            pixelBaseZ[x] = pixel00.z + pixelDeltaU.z * x.toFloat()
+        }
+
+        rowBaseX = FloatArray(imageHeight)
+        rowBaseY = FloatArray(imageHeight)
+        rowBaseZ = FloatArray(imageHeight)
+        for (y in 0 until imageHeight) {
+            rowBaseX[y] = pixelDeltaV.x * y.toFloat()
+            rowBaseY[y] = pixelDeltaV.y * y.toFloat()
+            rowBaseZ[y] = pixelDeltaV.z * y.toFloat()
+        }
+
         ensureTracePool(maxReflectionDepth + 2)
         progressFrames = buildProgressFrames()
     }
@@ -224,10 +382,13 @@ class Camera {
         tracePool = TracePool(
             rays = Array(requiredDepth) { Ray(Point(0.0f, 0.0f, 0.0f), Vector(0.0f, 0.0f, 0.0f), 0.0f) },
             hits = Array(requiredDepth) { Hit() },
-            scatters = Array(requiredDepth) { ScatteredResult() },
             colorOut = FloatArray(3),
             sampleOffset = Vector(0.0f, 0.0f, 0.0f),
             defocusOffset = Vector(0.0f, 0.0f, 0.0f),
+            unitDirection = Vector(0.0f, 0.0f, 0.0f),
+            reflectedDirection = Vector(0.0f, 0.0f, 0.0f),
+            randomDirection = Vector(0.0f, 0.0f, 0.0f),
+            scatterDir = Vector(0.0f, 0.0f, 0.0f),
         )
     }
 
@@ -252,12 +413,34 @@ class Camera {
             .append('\n')
     }
 
+    private fun reflectance(cosine: Float, ri: Float): Float {
+        var r0 = (1f - ri) / (1f + ri)
+        r0 *= r0
+        val oneMinusCos = 1.0f - cosine
+        return r0 + (1f - r0) * oneMinusCos * oneMinusCos * oneMinusCos * oneMinusCos * oneMinusCos
+    }
+
+    private fun randomInUnitSphere(out: Vector) {
+        while (true) {
+            val x = RandomSource.nextFloat(-1.0f, 1.0f)
+            val y = RandomSource.nextFloat(-1.0f, 1.0f)
+            val z = RandomSource.nextFloat(-1.0f, 1.0f)
+            if (x * x + y * y + z * z < 1.0f) {
+                out.set(x, y, z)
+                return
+            }
+        }
+    }
+
     private data class TracePool(
         val rays: Array<Ray>,
         val hits: Array<Hit>,
-        val scatters: Array<ScatteredResult>,
         val colorOut: FloatArray,
         val sampleOffset: Vector,
         val defocusOffset: Vector,
+        val unitDirection: Vector,
+        val reflectedDirection: Vector,
+        val randomDirection: Vector,
+        val scatterDir: Vector,
     )
 }

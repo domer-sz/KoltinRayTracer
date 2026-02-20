@@ -1,30 +1,45 @@
 package rayTraceTypescript
 
-data class Aabb(
-    val x: Interval = Interval.EMPTY,
-    val y: Interval = Interval.EMPTY,
-    val z: Interval = Interval.EMPTY
+class Aabb(
+    val minX: Float = Float.POSITIVE_INFINITY,
+    val maxX: Float = Float.NEGATIVE_INFINITY,
+    val minY: Float = Float.POSITIVE_INFINITY,
+    val maxY: Float = Float.NEGATIVE_INFINITY,
+    val minZ: Float = Float.POSITIVE_INFINITY,
+    val maxZ: Float = Float.NEGATIVE_INFINITY,
 ) {
 
     constructor(firstBox: Aabb, secondBox: Aabb) : this(
-        x = Interval(firstBox.x, secondBox.x),
-        y = Interval(firstBox.y, secondBox.y),
-        z = Interval(firstBox.z, secondBox.z),
+        minX = kotlin.math.min(firstBox.minX, secondBox.minX),
+        maxX = kotlin.math.max(firstBox.maxX, secondBox.maxX),
+        minY = kotlin.math.min(firstBox.minY, secondBox.minY),
+        maxY = kotlin.math.max(firstBox.maxY, secondBox.maxY),
+        minZ = kotlin.math.min(firstBox.minZ, secondBox.minZ),
+        maxZ = kotlin.math.max(firstBox.maxZ, secondBox.maxZ),
     )
 
     companion object {
         fun fromPoints(a: Point, b: Point): Aabb {
-            val ix = if (a[0] <= b[0]) Interval(a[0], b[0]) else Interval(b[0], a[0])
-            val iy = if (a[1] <= b[1]) Interval(a[1], b[1]) else Interval(b[1], a[1])
-            val iz = if (a[2] <= b[2]) Interval(a[2], b[2]) else Interval(b[2], a[2])
-            return Aabb(ix, iy, iz)
+            val minX = if (a.x <= b.x) a.x else b.x
+            val maxX = if (a.x <= b.x) b.x else a.x
+            val minY = if (a.y <= b.y) a.y else b.y
+            val maxY = if (a.y <= b.y) b.y else a.y
+            val minZ = if (a.z <= b.z) a.z else b.z
+            val maxZ = if (a.z <= b.z) b.z else a.z
+            return Aabb(minX, maxX, minY, maxY, minZ, maxZ)
         }
     }
 
-    fun axisInterval(axis: Int): Interval = when (axis) {
-        1 -> y
-        2 -> z
-        else -> x
+    fun minAt(axis: Int): Float = when (axis) {
+        1 -> minY
+        2 -> minZ
+        else -> minX
+    }
+
+    fun maxAt(axis: Int): Float = when (axis) {
+        1 -> maxY
+        2 -> maxZ
+        else -> maxX
     }
 
     fun hit(r: Ray, tMinInput: Float, tMaxInput: Float): Boolean {
@@ -34,24 +49,41 @@ data class Aabb(
         var tMin = tMinInput
         var tMax = tMaxInput
 
-        for (axis in 0 until 3) {
-            val ax = axisInterval(axis)
-            val invD = 1.0F / rayDir[axis]
-
-            var t0 = (ax.min - rayOrig[axis]) * invD
-            var t1 = (ax.max - rayOrig[axis]) * invD
-
-            if (t0 > t1) {
-                val tmp = t0
-                t0 = t1
-                t1 = tmp
-            }
-
-            if (t0 > tMin) tMin = t0
-            if (t1 < tMax) tMax = t1
-
-            if (tMax <= tMin) return false
+        val invDx = 1.0f / rayDir.x
+        var t0 = (minX - rayOrig.x) * invDx
+        var t1 = (maxX - rayOrig.x) * invDx
+        if (t0 > t1) {
+            val tmp = t0
+            t0 = t1
+            t1 = tmp
         }
+        if (t0 > tMin) tMin = t0
+        if (t1 < tMax) tMax = t1
+        if (tMax <= tMin) return false
+
+        val invDy = 1.0f / rayDir.y
+        t0 = (minY - rayOrig.y) * invDy
+        t1 = (maxY - rayOrig.y) * invDy
+        if (t0 > t1) {
+            val tmp = t0
+            t0 = t1
+            t1 = tmp
+        }
+        if (t0 > tMin) tMin = t0
+        if (t1 < tMax) tMax = t1
+        if (tMax <= tMin) return false
+
+        val invDz = 1.0f / rayDir.z
+        t0 = (minZ - rayOrig.z) * invDz
+        t1 = (maxZ - rayOrig.z) * invDz
+        if (t0 > t1) {
+            val tmp = t0
+            t0 = t1
+            t1 = tmp
+        }
+        if (t0 > tMin) tMin = t0
+        if (t1 < tMax) tMax = t1
+        if (tMax <= tMin) return false
 
         return true
     }

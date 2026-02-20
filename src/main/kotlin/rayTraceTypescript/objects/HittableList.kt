@@ -24,6 +24,8 @@ class HittableList(objects: MutableList<Hittable> = mutableListOf()) : Hittable 
     val objects: MutableList<Hittable> = mutableListOf()
     private var bbox: Aabb = Aabb()
     private val candidateHit = Hit()
+    private var cachedObjects: Array<Hittable> = emptyArray()
+    private var cacheDirty: Boolean = true
 
     init {
         // Important: use add() so bbox is computed exactly like in C++
@@ -39,18 +41,23 @@ class HittableList(objects: MutableList<Hittable> = mutableListOf()) : Hittable 
             // Subsequent objects: surrounding box of old + new
             Aabb(bbox, obj.aabbBoundingBox())
         }
+        cacheDirty = true
     }
 
     fun clear() {
         objects.clear()
         bbox = Aabb()
+        cachedObjects = emptyArray()
+        cacheDirty = false
     }
 
     override fun hit(ray: Ray, tMin: Float, tMax: Float, outHit: Hit): Boolean {
         var hitAnything = false
         var closestSoFar = tMax
 
-        for (obj in objects) {
+        val localObjects = objectsForTraversal()
+        for (i in localObjects.indices) {
+            val obj = localObjects[i]
             if (obj.hit(ray, tMin, closestSoFar, candidateHit)) {
                 hitAnything = true
                 closestSoFar = candidateHit.t
@@ -61,4 +68,19 @@ class HittableList(objects: MutableList<Hittable> = mutableListOf()) : Hittable 
     }
 
     override fun aabbBoundingBox(): Aabb = bbox
+
+    override fun prepareForRender() {
+        val localObjects = objectsForTraversal()
+        for (i in localObjects.indices) {
+            localObjects[i].prepareForRender()
+        }
+    }
+
+    private fun objectsForTraversal(): Array<Hittable> {
+        if (cacheDirty) {
+            cachedObjects = objects.toTypedArray()
+            cacheDirty = false
+        }
+        return cachedObjects
+    }
 }

@@ -7,11 +7,13 @@ import rayTraceTypescript.objects.BvhNode
 import rayTraceTypescript.objects.Hittable
 import rayTraceTypescript.objects.HittableList
 import rayTraceTypescript.objects.Sphere
+import rayTraceTypescript.utils.RandomSource
 import rayTraceTypescript.utils.randomFloat
 import kotlin.system.measureTimeMillis
 import kotlin.time.Duration
 
 fun main() {
+    RandomSource.withSeed(1337L)
     val bvhWorld = HittableList(mutableListOf(BvhNode(randomWorld())))
     val camera = Camera()
 
@@ -30,7 +32,7 @@ fun main() {
 
     var numberOfRays: Long = 0
     val time = measureTimeMillis {
-        numberOfRays = camera.render(bvhWorld)
+        numberOfRays = camera.render(bvhWorld, saveOutput = false)
     }
     printRenderReport(time, numberOfRays)
 }
