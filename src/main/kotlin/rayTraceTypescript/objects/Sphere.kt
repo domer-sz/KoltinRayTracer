@@ -1,7 +1,6 @@
 package rayTraceTypescript.objects
 
 import rayTraceTypescript.Aabb
-import rayTraceTypescript.Interval
 import rayTraceTypescript.Point
 import rayTraceTypescript.Ray
 import rayTraceTypescript.Vector
@@ -31,23 +30,49 @@ class Sphere constructor(val center: Ray, val radius: Float, val material: Mater
     }
     constructor(center1: Point, center2: Point, radius: Double, material: Material) : this(Ray(center1, center2 - center1), radius.toFloat(), material)
 
-    override fun hit(ray: Ray, rayT: Interval): Hit? {
-        val currentCenter = center.at(ray.time)
-        val oc =  ray.origin - currentCenter
-        val a = ray.direction.lengthSquared()
-        val h = Vector.dotProduct(ray.direction, -oc)
-        val c = oc.lengthSquared() - radius * radius
+    override fun hit(ray: Ray, tMin: Float, tMax: Float, outHit: Hit): Boolean {
+        val centerX = center.origin.x + ray.time * center.direction.x
+        val centerY = center.origin.y + ray.time * center.direction.y
+        val centerZ = center.origin.z + ray.time * center.direction.z
+
+        val ocX = ray.origin.x - centerX
+        val ocY = ray.origin.y - centerY
+        val ocZ = ray.origin.z - centerZ
+
+        val dirX = ray.direction.x
+        val dirY = ray.direction.y
+        val dirZ = ray.direction.z
+
+        val a = dirX * dirX + dirY * dirY + dirZ * dirZ
+        val h = -(dirX * ocX + dirY * ocY + dirZ * ocZ)
+        val c = ocX * ocX + ocY * ocY + ocZ * ocZ - radius * radius
         val discriminant = h * h - a * c
-        if (discriminant < 0) return null
+        if (discriminant < 0.0f) return false
+
         val sqrtd = sqrt(discriminant)
         var root = (h - sqrtd) / a
-        if (!rayT.surrounds(root)) {
+        if (root <= tMin || root >= tMax) {
             root = (h + sqrtd) / a
-            if (!rayT.surrounds(root)) return null
+            if (root <= tMin || root >= tMax) return false
         }
-        val hitpoint = ray.at(root)
-        val outwardNormal = (hitpoint - currentCenter) / radius
-        return Hit(ray, hitpoint, outwardNormal, material, root)
+
+        val pointX = ray.origin.x + root * dirX
+        val pointY = ray.origin.y + root * dirY
+        val pointZ = ray.origin.z + root * dirZ
+        val invRadius = 1.0f / radius
+
+        outHit.set(
+            ray,
+            pointX,
+            pointY,
+            pointZ,
+            (pointX - centerX) * invRadius,
+            (pointY - centerY) * invRadius,
+            (pointZ - centerZ) * invRadius,
+            material,
+            root
+        )
+        return true
     }
 
     override fun aabbBoundingBox(): Aabb = this.bbox

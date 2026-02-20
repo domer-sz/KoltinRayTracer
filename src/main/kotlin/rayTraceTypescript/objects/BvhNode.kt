@@ -1,7 +1,6 @@
 package rayTraceTypescript.objects
 
 import rayTraceTypescript.Aabb
-import rayTraceTypescript.Interval
 import rayTraceTypescript.Ray
 import kotlin.random.Random
 
@@ -10,6 +9,7 @@ class BvhNode : Hittable {
     private val left: Hittable
     private val right: Hittable
     private val bbox: Aabb
+    private val rightHitCandidate = Hit()
 
     constructor(list: HittableList) : this(list.objects, 0, list.objects.size)
 
@@ -44,20 +44,17 @@ class BvhNode : Hittable {
         bbox = Aabb(left.aabbBoundingBox(), right.aabbBoundingBox())
     }
 
-    override fun hit(ray: Ray, rayT: Interval): Hit? {
-        // not hitted
-        if (!bbox.hit(ray, rayT)) return null
+    override fun hit(ray: Ray, tMin: Float, tMax: Float, outHit: Hit): Boolean {
+        if (!bbox.hit(ray, tMin, tMax)) return false
 
-        val leftHit = left.hit(ray, rayT)
+        val hitLeft = left.hit(ray, tMin, tMax, outHit)
+        val rightMax = if (hitLeft) outHit.t else tMax
+        val hitRight = right.hit(ray, tMin, rightMax, rightHitCandidate)
+        if (hitRight) {
+            outHit.copyFrom(rightHitCandidate)
+        }
 
-        val rightInterval = Interval(
-            rayT.min,
-            leftHit?.t ?: rayT.max
-        )
-        val rightHit = right.hit(ray, rightInterval)
-
-        // return hit_left || hit_right;
-        return rightHit ?: leftHit
+        return hitLeft || hitRight
     }
 
     private fun boxCompare(a: Hittable, b: Hittable, axisIndex: Int): Boolean {

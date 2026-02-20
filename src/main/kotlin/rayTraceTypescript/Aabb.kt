@@ -27,12 +27,12 @@ data class Aabb(
         else -> x
     }
 
-    fun hit(r: Ray, rayT: Interval): Boolean {
+    fun hit(r: Ray, tMinInput: Float, tMaxInput: Float): Boolean {
         val rayOrig = r.origin
         val rayDir = r.direction
 
-        var tMin = rayT.min
-        var tMax = rayT.max
+        var tMin = tMinInput
+        var tMax = tMaxInput
 
         for (axis in 0 until 3) {
             val ax = axisInterval(axis)

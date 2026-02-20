@@ -4,25 +4,17 @@ import kotlin.math.*
 import rayTraceTypescript.Interval
 
 class Color(val r: Float, val g: Float, val b: Float) {
-    private val intensity = Interval(0.0f, 0.999f)
-
     constructor(r: Double, g: Double, b: Double) : this(r.toFloat(), g.toFloat(), b.toFloat())
 
     fun colorR(): Int {
-        val rGamma = lineatToGammaColor(r)
-        return floor(256.0f * intensity.clamp(rGamma)).toInt()
+        return toChannel(r)
     }
     fun colorG(): Int {
-        val gGamma = lineatToGammaColor(g)
-        return floor(256.0f * intensity.clamp(gGamma)).toInt()
+        return toChannel(g)
     }
     fun colorB(): Int {
-        val bGamma = lineatToGammaColor(b)
-        return floor(256.0f * intensity.clamp(bGamma)).toInt()
+        return toChannel(b)
     }
-
-    private fun lineatToGammaColor(linear: Float): Float =
-        if (linear > 0.0f) sqrt(linear) else 0.0f
 
     operator fun plus(other: Color): Color = Color(r + other.r, g + other.g, b + other.b)
     operator fun minus(other: Color): Color = Color(r - other.r, g - other.g, b - other.b)
@@ -40,6 +32,15 @@ class Color(val r: Float, val g: Float, val b: Float) {
     fun toStringColor(): String = "${colorR()} ${colorG()} ${colorB()}"
 
     companion object {
+        private val INTENSITY = Interval(0.0f, 0.999f)
+
+        private fun linearToGammaColor(linear: Float): Float =
+            if (linear > 0.0f) sqrt(linear) else 0.0f
+
+        @JvmStatic
+        fun toChannel(linear: Float): Int =
+            floor(256.0f * INTENSITY.clamp(linearToGammaColor(linear))).toInt()
+
         @JvmStatic fun dotProduct(u: Color, v: Color): Float = u.r*v.r + u.g*v.g + u.b*v.b
     }
 }

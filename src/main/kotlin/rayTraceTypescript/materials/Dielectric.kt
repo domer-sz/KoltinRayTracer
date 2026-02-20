@@ -1,6 +1,5 @@
 package rayTraceTypescript.materials
 
-import rayTraceTypescript.Color
 import rayTraceTypescript.Ray
 import rayTraceTypescript.Vector
 import rayTraceTypescript.objects.Hit
@@ -11,22 +10,37 @@ import rayTraceTypescript.utils.RandomSource
 
 class Dielectric(val ri: Float) : Material {
     constructor(ri: Double) : this(ri.toFloat())
-    override fun scatter(rayIn: Ray, hit: Hit): ScatteredResult? {
-        val attenuation = Color(1.0f, 1.0f, 1.0f)
+
+    private val unitDirection = Vector(0.0f, 0.0f, 0.0f)
+    private val direction = Vector(0.0f, 0.0f, 0.0f)
+
+    override fun scatter(rayIn: Ray, hit: Hit, outScatter: ScatteredResult): Boolean {
         val refractionRatio = if (hit.frontFace) 1.0f / ri else ri
-        val unitDirection = rayIn.direction.unit()
-        val cosTheta = min(Vector.Companion.dotProduct(-unitDirection, hit.normal), 1.0f)
+        Vector.unit(rayIn.direction, unitDirection)
+        val cosTheta = min(-Vector.dotProduct(unitDirection, hit.normal), 1.0f)
         val sinTheta = sqrt(1.0f - cosTheta * cosTheta)
 
         val cannotRefract = refractionRatio * sinTheta > 1.0f
         val useReflect = cannotRefract || reflectance(cosTheta, refractionRatio) > RandomSource.nextFloat()
-        val direction = if (useReflect)
-            Vector.Companion.reflect(unitDirection, hit.normal)
-        else
-            Vector.Companion.refract(unitDirection, hit.normal, refractionRatio)
+        if (useReflect) {
+            Vector.reflect(unitDirection, hit.normal, direction)
+        } else {
+            Vector.refract(unitDirection, hit.normal, refractionRatio, direction)
+        }
 
-        val scattered = Ray(hit.point, direction, rayIn.time)
-        return ScatteredResult(attenuation, scattered)
+        outScatter.set(
+            1.0f,
+            1.0f,
+            1.0f,
+            hit.point.x,
+            hit.point.y,
+            hit.point.z,
+            direction.x,
+            direction.y,
+            direction.z,
+            rayIn.time,
+        )
+        return true
     }
 
     private fun reflectance(cosine: Float, ri: Float): Float {

@@ -1,7 +1,6 @@
 package rayTraceTypescript.objects
 
 import rayTraceTypescript.Aabb
-import rayTraceTypescript.Interval
 import rayTraceTypescript.Ray
 
 //class HittableList(val objects: MutableList<Hittable>) : Hittable { //before bbox
@@ -23,7 +22,8 @@ import rayTraceTypescript.Ray
 class HittableList(objects: MutableList<Hittable> = mutableListOf()) : Hittable {
 
     val objects: MutableList<Hittable> = mutableListOf()
-    private var bbox: Aabb = Aabb() // or whatever “empty/invalid” box you use
+    private var bbox: Aabb = Aabb()
+    private val candidateHit = Hit()
 
     init {
         // Important: use add() so bbox is computed exactly like in C++
@@ -46,18 +46,18 @@ class HittableList(objects: MutableList<Hittable> = mutableListOf()) : Hittable 
         bbox = Aabb()
     }
 
-    override fun hit(ray: Ray, rayT: Interval): Hit? {
-        var hit: Hit? = null
-        var closestSoFar = rayT.max
+    override fun hit(ray: Ray, tMin: Float, tMax: Float, outHit: Hit): Boolean {
+        var hitAnything = false
+        var closestSoFar = tMax
 
         for (obj in objects) {
-            val tmp = obj.hit(ray, Interval(rayT.min, closestSoFar))
-            if (tmp != null) {
-                closestSoFar = tmp.t
-                hit = tmp
+            if (obj.hit(ray, tMin, closestSoFar, candidateHit)) {
+                hitAnything = true
+                closestSoFar = candidateHit.t
+                outHit.copyFrom(candidateHit)
             }
         }
-        return hit
+        return hitAnything
     }
 
     override fun aabbBoundingBox(): Aabb = bbox
