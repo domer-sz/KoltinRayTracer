@@ -10,29 +10,28 @@ import rayTraceTypescript.objects.Sphere
 import rayTraceTypescript.utils.RandomSource
 import rayTraceTypescript.utils.randomFloat
 import kotlin.system.measureTimeMillis
-import kotlin.time.Duration
 
 fun main() {
     RandomSource.withSeed(1337L)
-    val bvhWorld = HittableList(mutableListOf(BvhNode(randomWorld())))
+    val bvhWorld: Hittable = BvhNode(prepareWorld())
     val camera = Camera()
 
     camera.aspectRatio = 16.0f / 9.0f
     camera.imageWidth = 500
     camera.maxReflectionDepth = 20
-    camera.samplesPerPixel = 90
+    camera.samplesPerPixel = 190
 
     camera.vfov = 20.0f
     camera.lookFrom = Point(13.0f, 2.0f, 3.0f)
     camera.lookAt = Point(0.0f, 0.0f, 0.0f)
     camera.vUp = Vector(0.0f, 1.0f, 0.0f)
 
-    camera.defocusAngle = 0.6f
+    camera.defocusAngle = 0.0f
     camera.focusDistance = 10.0f
 
     var numberOfRays: Long = 0
     val time = measureTimeMillis {
-        numberOfRays = camera.render(bvhWorld, saveOutput = false)
+        numberOfRays = camera.render(bvhWorld, saveOutput = true)
     }
     printRenderReport(time, numberOfRays)
 }

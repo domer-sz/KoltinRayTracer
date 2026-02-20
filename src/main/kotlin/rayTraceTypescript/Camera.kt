@@ -5,11 +5,13 @@ import kotlin.math.tan
 import kotlin.math.sqrt
 import rayTraceTypescript.utils.degreesToRadians
 import rayTraceTypescript.utils.infinity
-import rayTraceTypescript.objects.HittableList
+import rayTraceTypescript.objects.Hittable
 import java.nio.file.Files
 import java.nio.file.Path
 import java.nio.file.Paths
 import java.nio.charset.StandardCharsets
+import java.util.concurrent.Executors
+import java.util.concurrent.atomic.AtomicInteger
 import rayTraceTypescript.utils.RandomSource
 import rayTraceTypescript.utils.randomFloat
 import rayTraceTypescript.objects.Hit
@@ -29,6 +31,8 @@ class Camera {
     var defocusAngle: Float = 0.0f
     var focusDistance: Float = 10.0f
     var showProgress: Boolean = false
+    var useParallel: Boolean = false
+    var workerThreads: Int = Runtime.getRuntime().availableProcessors().coerceAtLeast(1)
 
     private var imageHeight: Int = 0
     private var pixelSamplesScale: Float = 1.0f
@@ -48,44 +52,46 @@ class Camera {
     private lateinit var progressFrames: Array<String>
 
     fun render(
-        world: HittableList,
+        world: Hittable,
         outputPath: Path = Paths.get("image.ppm"),
         saveOutput: Boolean = true,
     ): Long {
         initialize()
         world.prepareForRender()
 
-        val sb = if (saveOutput) {
-            val header = "P3\n${imageWidth} ${imageHeight}\n255\n"
-            val estimatedPixelChars = imageWidth * imageHeight * 12
-            StringBuilder(header.length + estimatedPixelChars).apply { append(header) }
-        } else {
-            null
-        }
-
         val totalPixels = imageWidth * imageHeight
+        val colorBuffer = if (saveOutput) IntArray(totalPixels * 3) else null
         val rayCounter = longArrayOf(0L)
         var progress = 0
         var lastPct = -1
 
-        for (y in 0 until imageHeight) {
-            for (x in 0 until imageWidth) {
-                var pixelR = 0.0f
-                var pixelG = 0.0f
-                var pixelB = 0.0f
-                var sample = 0
-                while (sample < samplesPerPixel) {
-                    getRay(x, y, tracePool.rays[0], tracePool.sampleOffset, tracePool.defocusOffset)
-                    rayColor(tracePool.rays[0], maxReflectionDepth, world, 0, tracePool, rayCounter)
-                    pixelR += tracePool.colorOut[0]
-                    pixelG += tracePool.colorOut[1]
-                    pixelB += tracePool.colorOut[2]
-                    sample++
-                }
-                if (sb != null) {
-                    appendColor(sb, pixelR * pixelSamplesScale, pixelG * pixelSamplesScale, pixelB * pixelSamplesScale)
-                }
+        if (useParallel && workerThreads > 1) {
+            renderParallel(world, colorBuffer, rayCounter, totalPixels)
+        } else {
+            renderSequential(world, colorBuffer, rayCounter, totalPixels)
+        }
 
+        if (showProgress) {
+            println()
+        }
+        if (colorBuffer != null) {
+            writeColorBuffer(outputPath, colorBuffer)
+        }
+        return rayCounter[0]
+    }
+
+    private fun renderSequential(
+        world: Hittable,
+        colorBuffer: IntArray?,
+        rayCounter: LongArray,
+        totalPixels: Int,
+    ) {
+        var progress = 0
+        var lastPct = -1
+        for (y in 0 until imageHeight) {
+            val rowOffset = y * imageWidth
+            for (x in 0 until imageWidth) {
+                tracePixel(world, x, y, colorBuffer, rowOffset + x, tracePool, rayCounter)
                 if (showProgress) {
                     progress += 1
                     val pct = (progress * 100) / totalPixels
@@ -97,20 +103,100 @@ class Camera {
                 }
             }
         }
+    }
 
-        if (showProgress) {
-            println()
+    private fun renderParallel(
+        world: Hittable,
+        colorBuffer: IntArray?,
+        rayCounter: LongArray,
+        totalPixels: Int,
+    ) {
+        val nextRow = AtomicInteger(0)
+        val processed = AtomicInteger(0)
+        val progressPct = AtomicInteger(-1)
+        val threads = workerThreads.coerceAtLeast(1)
+        val executor = Executors.newFixedThreadPool(threads)
+        try {
+            val futures = ArrayList<java.util.concurrent.Future<*>>(threads)
+            repeat(threads) {
+                futures += executor.submit {
+                    val localTracePool = TracePool(
+                        rays = Array(maxReflectionDepth + 2) { Ray(Point(0.0f, 0.0f, 0.0f), Vector(0.0f, 0.0f, 0.0f), 0.0f) },
+                        hits = Array(maxReflectionDepth + 2) { Hit() },
+                        colorOut = FloatArray(3),
+                        sampleOffset = Vector(0.0f, 0.0f, 0.0f),
+                        defocusOffset = Vector(0.0f, 0.0f, 0.0f),
+                        unitDirection = Vector(0.0f, 0.0f, 0.0f),
+                        reflectedDirection = Vector(0.0f, 0.0f, 0.0f),
+                        randomDirection = Vector(0.0f, 0.0f, 0.0f),
+                        scatterDir = Vector(0.0f, 0.0f, 0.0f),
+                    )
+                    val localCounter = longArrayOf(0L)
+                    while (true) {
+                        val y = nextRow.getAndIncrement()
+                        if (y >= imageHeight) break
+                        val rowOffset = y * imageWidth
+                        for (x in 0 until imageWidth) {
+                            tracePixel(world, x, y, colorBuffer, rowOffset + x, localTracePool, localCounter)
+                        }
+                        if (showProgress) {
+                            val done = processed.addAndGet(imageWidth)
+                            val pct = (done * 100) / totalPixels
+                            while (true) {
+                                val prev = progressPct.get()
+                                if (pct <= prev) break
+                                if (progressPct.compareAndSet(prev, pct)) {
+                                    print(progressFrames[pct])
+                                    System.out.flush()
+                                    break
+                                }
+                            }
+                        }
+                    }
+                    synchronized(rayCounter) {
+                        rayCounter[0] += localCounter[0]
+                    }
+                }
+            }
+            futures.forEach { it.get() }
+        } finally {
+            executor.shutdown()
         }
-        if (sb != null) {
-            Files.write(outputPath, sb.toString().toByteArray(StandardCharsets.UTF_8))
+    }
+
+    private fun tracePixel(
+        world: Hittable,
+        x: Int,
+        y: Int,
+        colorBuffer: IntArray?,
+        bufferIndex: Int,
+        pool: TracePool = tracePool,
+        rayCounter: LongArray,
+    ) {
+        var pixelR = 0.0f
+        var pixelG = 0.0f
+        var pixelB = 0.0f
+        var sample = 0
+        while (sample < samplesPerPixel) {
+            getRay(x, y, pool.rays[0], pool.sampleOffset, pool.defocusOffset)
+            rayColor(pool.rays[0], maxReflectionDepth, world, 0, pool, rayCounter)
+            pixelR += pool.colorOut[0]
+            pixelG += pool.colorOut[1]
+            pixelB += pool.colorOut[2]
+            sample++
         }
-        return rayCounter[0]
+        if (colorBuffer != null) {
+            val idx = bufferIndex * 3
+            colorBuffer[idx] = Color.toChannel(pixelR * pixelSamplesScale)
+            colorBuffer[idx + 1] = Color.toChannel(pixelG * pixelSamplesScale)
+            colorBuffer[idx + 2] = Color.toChannel(pixelB * pixelSamplesScale)
+        }
     }
 
     private fun rayColor(
         ray: Ray,
         reflectionDepth: Int,
-        world: HittableList,
+        world: Hittable,
         depthIndex: Int,
         tracePool: TracePool,
         rayCounter: LongArray,
@@ -404,13 +490,22 @@ class Camera {
         out[2] = 0.0f
     }
 
-    private fun appendColor(sb: StringBuilder, r: Float, g: Float, b: Float) {
-        sb.append(Color.toChannel(r))
-            .append(' ')
-            .append(Color.toChannel(g))
-            .append(' ')
-            .append(Color.toChannel(b))
-            .append('\n')
+    private fun writeColorBuffer(outputPath: Path, colorBuffer: IntArray) {
+        val header = "P3\n${imageWidth} ${imageHeight}\n255\n"
+        val estimatedPixelChars = imageWidth * imageHeight * 12
+        val sb = StringBuilder(header.length + estimatedPixelChars)
+        sb.append(header)
+        var i = 0
+        while (i < colorBuffer.size) {
+            sb.append(colorBuffer[i])
+                .append(' ')
+                .append(colorBuffer[i + 1])
+                .append(' ')
+                .append(colorBuffer[i + 2])
+                .append('\n')
+            i += 3
+        }
+        Files.write(outputPath, sb.toString().toByteArray(StandardCharsets.UTF_8))
     }
 
     private fun reflectance(cosine: Float, ri: Float): Float {
