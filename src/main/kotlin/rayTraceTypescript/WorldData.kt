@@ -2,11 +2,13 @@ package rayTraceTypescript
 
 import rayTraceTypescript.materials.*
 import rayTraceTypescript.objects.*
+import rayTraceTypescript.textures.CheckerTexture
 
 object WorldData {
     fun hardcodedWorld(): HittableList {
         val worldObjects: MutableList<Hittable> = mutableListOf()
-        worldObjects.add(Sphere(Point(0.000000000000000, -1000.000000000000000, 0.000000000000000), 1000.000000000000000, Lambertian(Color(0.500000000000000, 0.500000000000000, 0.500000000000000))))
+        val checker = CheckerTexture(.32F, Color(.2, .3, .1), Color(.9, .9, .9))
+        worldObjects.add(Sphere(Point(0.000000000000000, -1000.000000000000000, 0.000000000000000), 1000.000000000000000, Lambertian(checker)))
         worldObjects.add(Sphere(Point(-10.813367073374401, 0.200000000000000, -10.864900497860233), 0.200000000000000, Lambertian(Color(0.001188799582100, 0.044312821430165, 0.297586068682714))))
         worldObjects.add(Sphere(Point(-10.720779401304652, 0.200000000000000, -9.547327437237076), 0.200000000000000, Lambertian(Color(0.115109367836113, 0.267986499018824, 0.140499006631462))))
         worldObjects.add(Sphere(Point(-10.117555584306539, 0.200000000000000, -8.866180303171697), 0.200000000000000, Metal(Color(0.773626215761138, 0.815977102136331, 0.928786131109529), 0.481275285621595)))

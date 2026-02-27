@@ -47,7 +47,7 @@ class Sphere constructor(val center: Ray, val radius: Float, val material: Mater
         }
         val hitpoint = ray.at(root)
         val outwardNormal = (hitpoint - currentCenter) / radius
-        return Hit(ray, hitpoint, outwardNormal, material, root)
+        return Hit(ray, hitpoint, outwardNormal, material, root, 0F, 0F)
     }
 
     override fun aabbBoundingBox(): Aabb = this.bbox

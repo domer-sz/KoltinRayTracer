@@ -5,7 +5,15 @@ import rayTraceTypescript.Ray
 import rayTraceTypescript.Vector
 import rayTraceTypescript.materials.Material
 
-class Hit(ray: Ray, val point: Point, outwardNormal: Vector, val material: Material, val t: Float) {
+class Hit(
+    ray: Ray,
+    val point: Point,
+    outwardNormal: Vector,
+    val material: Material,
+    val t: Float,
+    val u: Float,
+    val v: Float
+) {
     var normal: Vector = outwardNormal
     var frontFace: Boolean = true
 

@@ -7,6 +7,7 @@ import rayTraceTypescript.objects.BvhNode
 import rayTraceTypescript.objects.Hittable
 import rayTraceTypescript.objects.HittableList
 import rayTraceTypescript.objects.Sphere
+import rayTraceTypescript.textures.CheckerTexture
 import rayTraceTypescript.utils.randomFloat
 import kotlin.system.measureTimeMillis
 import kotlin.time.Duration
@@ -50,7 +51,8 @@ fun prepareWorld(): HittableList = WorldData.hardcodedWorld()
 fun randomWorld(): HittableList {
     val worldObjects: MutableList<Hittable> = mutableListOf()
 
-    val groundMaterial = Lambertian(Color(0.5f, 0.5f, 0.5f))
+    val checker = CheckerTexture(.32F, Color(.2, .3, .1), Color(.9, .9, .9))
+    val groundMaterial = Lambertian(checker)
     val groundSphere = Sphere(Point(0.0f, -1000.0f, 0.0f), 1000.0F, groundMaterial)
     worldObjects.add(groundSphere)
 
