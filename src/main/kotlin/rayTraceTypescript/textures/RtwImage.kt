@@ -15,7 +15,7 @@ class RtwImage() : AutoCloseable {
     private var bytesPerScanline: Int = 0
 
     companion object {
-        private val MAGENTA = byteArrayOf(255.toByte(), 0, 255.toByte())
+        private val MAGENTA = intArrayOf(255, 0, 255)
 
         private fun clamp(x: Int, low: Int, high: Int): Int {
             // Clamp to [low, high)
@@ -66,20 +66,20 @@ class RtwImage() : AutoCloseable {
     fun height(): Int = if (fdata == null) 0 else imageHeight
 
     /**
-     * Returns 3 RGB bytes for pixel at (x, y).
+     * Returns 3 RGB channel values for pixel at (x, y).
      * If no image is loaded, returns magenta.
      */
-    fun pixelData(x: Int, y: Int): ByteArray {
+    fun pixelData(x: Int, y: Int): IntArray {
         val data = bdata ?: return MAGENTA.copyOf()
 
         val cx = clamp(x, 0, imageWidth)
         val cy = clamp(y, 0, imageHeight)
         val offset = cy * bytesPerScanline + cx * bytesPerPixel
 
-        return byteArrayOf(
-            data[offset],
-            data[offset + 1],
-            data[offset + 2]
+        return intArrayOf(
+            data[offset].toInt() and 0xFF,
+            data[offset + 1].toInt() and 0xFF,
+            data[offset + 2].toInt() and 0xFF
         )
     }
 
