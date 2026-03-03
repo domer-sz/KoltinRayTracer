@@ -8,11 +8,19 @@ import rayTraceTypescript.objects.Hittable
 import rayTraceTypescript.objects.HittableList
 import rayTraceTypescript.objects.Sphere
 import rayTraceTypescript.textures.CheckerTexture
+import rayTraceTypescript.textures.ImageTexture
 import rayTraceTypescript.utils.randomFloat
 import kotlin.system.measureTimeMillis
 import kotlin.time.Duration
 
 fun main() {
+    when(2) {
+        1 -> spheresWorld()
+        2 -> earth()
+    }
+}
+
+private fun spheresWorld() {
     val bvhWorld = HittableList(mutableListOf(BvhNode(randomWorld())))
     val camera = Camera()
 
@@ -106,3 +114,25 @@ fun Long.toHumanReadable(): String {
         else -> this.toString()
     }
 }
+
+fun earth() {
+        val earthTexture = ImageTexture("earthmap.jpg");
+        val earthSurface = Lambertian(earthTexture);
+        val globe = Sphere(Point(0f,0f,0f), 2f, earthSurface);
+
+        val cam = Camera()
+
+        cam.aspectRatio      = 16.0f / 9.0f
+        cam.imageWidth       = 400
+        cam.samplesPerPixel = 100
+        cam.maxReflectionDepth         = 50
+
+        cam.vfov     = 20f
+        cam.lookFrom = Point(0f,0f,12f)
+        cam.lookAt   = Point(0f,0f,0f)
+        cam.vUp      = Vector(0f,1f,0f)
+
+        cam.defocusAngle = 0f
+
+        cam.render(HittableList(mutableListOf(globe)));
+    }

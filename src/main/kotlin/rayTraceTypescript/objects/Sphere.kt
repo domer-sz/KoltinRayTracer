@@ -4,8 +4,10 @@ import rayTraceTypescript.Aabb
 import rayTraceTypescript.Interval
 import rayTraceTypescript.Point
 import rayTraceTypescript.Ray
+import rayTraceTypescript.UV
 import rayTraceTypescript.Vector
 import rayTraceTypescript.materials.Material
+import kotlin.math.PI
 import kotlin.math.sqrt
 
 class Sphere constructor(val center: Ray, val radius: Float, val material: Material) : Hittable {
@@ -47,8 +49,28 @@ class Sphere constructor(val center: Ray, val radius: Float, val material: Mater
         }
         val hitpoint = ray.at(root)
         val outwardNormal = (hitpoint - currentCenter) / radius
-        return Hit(ray, hitpoint, outwardNormal, material, root, 0F, 0F)
+        val uv = getSphereUv(outwardNormal)
+        return Hit(ray, hitpoint, outwardNormal, material, root, uv.u, uv.v)
     }
 
     override fun aabbBoundingBox(): Aabb = this.bbox
+
+    companion object {
+        fun getSphereUv(point: Vector): UV {
+            // p: a given point on the sphere of radius one, centered at the origin.
+            // u: returned value [0,1] of angle around the Y axis from X=-1.
+            // v: returned value [0,1] of angle from Y=-1 to Y=+1.
+            //     <1 0 0> yields <0.50 0.50>       <-1  0  0> yields <0.00 0.50>
+            //     <0 1 0> yields <0.50 1.00>       < 0 -1  0> yields <0.50 0.00>
+            //     <0 0 1> yields <0.25 0.50>       < 0  0 -1> yields <0.75 0.50>
+
+            val theta = Math.acos(-point.y.toDouble())
+            val phi = Math.atan2(-point.z.toDouble(), point.x + PI)
+
+            val u = (phi / (2* PI)).toFloat()
+            val v = (theta / PI).toFloat()
+
+            return UV(u = u, v = v)
+        }
+    }
 }
