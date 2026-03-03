@@ -65,7 +65,7 @@ class Sphere constructor(val center: Ray, val radius: Float, val material: Mater
             //     <0 0 1> yields <0.25 0.50>       < 0  0 -1> yields <0.75 0.50>
 
             val theta = Math.acos(-point.y.toDouble())
-            val phi = Math.atan2(-point.z.toDouble(), point.x + PI)
+            val phi = Math.atan2(-point.z.toDouble(), point.x.toDouble()) + PI
 
             val u = (phi / (2* PI)).toFloat()
             val v = (theta / PI).toFloat()
