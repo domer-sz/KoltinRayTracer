@@ -7,8 +7,8 @@ import kotlin.random.Random
 
 class BvhNode : Hittable {
 
-    private val left: Hittable
-    private val right: Hittable
+    internal val left: Hittable
+    internal val right: Hittable
     private lateinit var bbox: Aabb
 
     constructor(list: HittableList) : this(list.objects, 0, list.objects.size)

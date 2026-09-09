@@ -3,23 +3,22 @@ package rayTraceTypescript
 import org.junit.jupiter.api.Assertions.assertEquals
 import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Test
-import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Paths
 import java.util.zip.GZIPInputStream
 import java.util.zip.GZIPOutputStream
-import kotlin.math.abs
+import rayTraceTypescript.render.CpuRenderer
 import rayTraceTypescript.utils.RandomSource
 
 class ImageRegressionTest {
     @Test
     fun `rendered ppm stays close to golden image`() {
-        val reference = parsePpm(loadReferenceImage())
+        val reference = PpmSupport.parse(loadReferenceImage())
         val actual = renderCurrentScene()
         assertEquals(reference.width, actual.width, "reference width")
         assertEquals(reference.height, actual.height, "reference height")
 
-        val diff = diffStats(reference, actual)
+        val diff = PpmSupport.diff(reference, actual, HIGH_DIFF_THRESHOLD)
         // Ziarno RNG ustawiamy w teście, więc oczekujemy zerowych różnic między renderami.
         assertTrue(
             diff.meanAbsDiff <= MEAN_ABS_DIFF_THRESHOLD,
@@ -31,7 +30,7 @@ class ImageRegressionTest {
         )
     }
 
-    private fun renderCurrentScene(): PpmImage {
+    private fun renderCurrentScene(): PpmSupport.PpmImage {
         val camera = Camera().apply {
             aspectRatio = 16.0f / 9.0f
             imageWidth = 300
@@ -48,10 +47,11 @@ class ImageRegressionTest {
         val tempFile = Files.createTempFile("raytracer-image-test", ".ppm")
         RandomSource.withSeed(4242L)
         return try {
-            camera.render(world, tempFile)
+            // The golden image is the CPU reference: pinned seed, sequential sampling.
+            CpuRenderer().render(world, camera.initialize(), tempFile)
             val bytes = Files.readAllBytes(tempFile)
             maybeUpdateReference(bytes)
-            parsePpm(bytes)
+            PpmSupport.parse(bytes)
         } finally {
             Files.deleteIfExists(tempFile)
             RandomSource.reset()
@@ -64,41 +64,6 @@ class ImageRegressionTest {
                 "Missing reference image resource"
             }
         ).use { it.readBytes() }
-
-    private fun parsePpm(bytes: ByteArray): PpmImage {
-        val content = bytes.toString(StandardCharsets.UTF_8).trim()
-        val tokens = content.split(Regex("\\s+"))
-        require(tokens.size >= 4) { "Malformed PPM header" }
-        require(tokens[0] == "P3") { "Only ASCII PPM supported" }
-        val width = tokens[1].toInt()
-        val height = tokens[2].toInt()
-        val maxVal = tokens[3].toInt()
-        require(maxVal == 255) { "Unexpected max color value ${'$'}maxVal" }
-        val expectedValues = width * height * 3
-        val remaining = tokens.drop(4)
-        require(remaining.size >= expectedValues) { "Not enough pixel data" }
-        val pixels = IntArray(expectedValues) { idx -> remaining[idx].toInt() }
-        return PpmImage(width, height, pixels)
-    }
-
-    private fun diffStats(expected: PpmImage, actual: PpmImage): DiffStats {
-        require(expected.pixels.size == actual.pixels.size) { "Pixel counts differ" }
-        var sum = 0.0f
-        var maxDiff = 0
-        var highDiffCount = 0
-        expected.pixels.indices.forEach { idx ->
-            val delta = abs(expected.pixels[idx] - actual.pixels[idx])
-            sum += delta.toFloat()
-            if (delta > maxDiff) maxDiff = delta
-            if (delta >= HIGH_DIFF_THRESHOLD) highDiffCount += 1
-        }
-        val mean = sum / expected.pixels.size.toFloat()
-        return DiffStats(mean, maxDiff, highDiffCount)
-    }
-
-    data class PpmImage(val width: Int, val height: Int, val pixels: IntArray)
-
-    data class DiffStats(val meanAbsDiff: Float, val maxDiff: Int, val highDiffCount: Int)
 
     private fun maybeUpdateReference(bytes: ByteArray) {
         if (System.getenv("UPDATE_REFERENCE_IMAGE") == "1") {

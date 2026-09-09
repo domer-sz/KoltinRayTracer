@@ -47,11 +47,9 @@ private fun spheresWorld() {
 private fun printRenderReport(time: Long, numberOfRays: Long) {
     println("Execution time: ${formatDuration(time)}")
     println("Number of rays: ${numberOfRays.toHumanReadable()}")
-    println(
-        "Number of rays per second: ${
-            (numberOfRays / java.time.Duration.ofMillis(time).toSeconds()).toHumanReadable()
-        }"
-    )
+    // GPU renders can finish inside a second, so rate from milliseconds.
+    val raysPerSecond = if (time <= 0) numberOfRays else numberOfRays * 1000 / time
+    println("Number of rays per second: ${raysPerSecond.toHumanReadable()}")
 }
 
 fun prepareWorld(): HittableList = WorldData.hardcodedWorld()

@@ -4,7 +4,7 @@ import rayTraceTypescript.Color
 import rayTraceTypescript.Interval
 import rayTraceTypescript.Point
 
-class ImageTexture(private val image: RtwImage) : Texture {
+class ImageTexture(internal val image: RtwImage) : Texture {
     constructor(imageName: String) : this(RtwImage(imageName))
 
     override fun value(u: Float, v: Float, point: Point): Color {

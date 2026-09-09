@@ -62,6 +62,9 @@ class RtwImage() : AutoCloseable {
         System.err.println("ERROR: Could not load image file '$imageFilename'.")
     }
 
+    /** Raw 8-bit RGB scanlines (RGBRGB...), or null when no image is loaded. */
+    internal fun rgbBytes(): ByteArray? = bdata
+
     fun width(): Int = if (fdata == null) 0 else imageWidth
     fun height(): Int = if (fdata == null) 0 else imageHeight
 
