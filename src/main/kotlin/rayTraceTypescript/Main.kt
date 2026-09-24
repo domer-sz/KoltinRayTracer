@@ -16,7 +16,12 @@ import rayTraceTypescript.scenes.BookScenes
 
 fun main() {
     val scene = BookScenes.byName(System.getProperty("rt.scene", "earth"))
-    println("Scene: ${scene.name}")
+    // The books' final scenes are quoted at sample counts that take hours; these let a scene
+    // be scaled down without editing it.
+    System.getProperty("rt.samples")?.toIntOrNull()?.let { scene.camera.samplesPerPixel = it }
+    System.getProperty("rt.width")?.toIntOrNull()?.let { scene.camera.imageWidth = it }
+    System.getProperty("rt.depth")?.toIntOrNull()?.let { scene.camera.maxReflectionDepth = it }
+    println("Scene: ${scene.name} (${scene.camera.imageWidth}px, ${scene.camera.samplesPerPixel} spp)")
 
     // -Drt.out redirects the render, so a quick look does not overwrite the committed image.ppm.
     val output = java.nio.file.Paths.get(System.getProperty("rt.out", "image.ppm"))

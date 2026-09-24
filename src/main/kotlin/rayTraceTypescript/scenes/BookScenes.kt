@@ -4,7 +4,9 @@ import rayTraceTypescript.Camera
 import rayTraceTypescript.Color
 import rayTraceTypescript.Point
 import rayTraceTypescript.Vector
+import rayTraceTypescript.materials.Dielectric
 import rayTraceTypescript.materials.DiffuseLight
+import rayTraceTypescript.materials.Metal
 import rayTraceTypescript.materials.Lambertian
 import rayTraceTypescript.materials.Material
 import rayTraceTypescript.objects.BvhNode
@@ -18,6 +20,7 @@ import rayTraceTypescript.objects.Translate
 import rayTraceTypescript.objects.box
 import rayTraceTypescript.objects.Sphere
 import rayTraceTypescript.randomWorld
+import rayTraceTypescript.utils.randomFloat
 import rayTraceTypescript.textures.CheckerTexture
 import rayTraceTypescript.textures.ImageTexture
 import rayTraceTypescript.textures.NoiseTexture
@@ -37,6 +40,7 @@ object BookScenes {
         "cornell-box" to { cornellBox() },
         "cornell-blocks" to { cornellBlocks() },
         "cornell-smoke" to { cornellSmoke() },
+        "final-week" to { finalWeek() },
         "model" to { model() }
     )
 
@@ -248,6 +252,73 @@ object BookScenes {
                 )
             ),
             camera = cornellBox(listOf(), samples, width).camera
+        )
+    }
+
+    /**
+     * The Next Week, chapter 10: every feature of the book in one room - a floor of boxes of
+     * random height, a moving sphere, glass, metal, a glass ball filled with blue fog, a thin
+     * white haze over the whole scene, the earth, marble, and a block of a thousand spheres
+     * rotated into place.
+     *
+     * The book renders this at 10000 samples; the default here is what a machine can finish in
+     * a sitting. Without ./earthmap.jpg (which this repository does not carry) the globe falls
+     * back to the cyan ImageTexture uses for a missing file.
+     */
+    fun finalWeek(samples: Int = 400, width: Int = 600): SceneDefinition {
+        val ground = Lambertian(Color(0.48f, 0.83f, 0.53f))
+        val floorBoxes = mutableListOf<Hittable>()
+        val boxesPerSide = 20
+        for (i in 0 until boxesPerSide) {
+            for (j in 0 until boxesPerSide) {
+                val w = 100.0f
+                val x0 = -1000.0f + i * w
+                val z0 = -1000.0f + j * w
+                val y1 = randomFloat(1.0f, 101.0f)
+                floorBoxes.add(box(Point(x0, 0.0f, z0), Point(x0 + w, y1, z0 + w), ground))
+            }
+        }
+
+        val spheresInBlock = mutableListOf<Hittable>()
+        val white = Lambertian(Color(0.73f, 0.73f, 0.73f))
+        repeat(1000) {
+            spheresInBlock.add(Sphere(Vector.random(0.0f, 165.0f).toPoint(), 10.0f, white))
+        }
+
+        val blueFogBoundary = Sphere(Point(360f, 150f, 145f), 70f, Dielectric(1.5f))
+        val hazeBoundary = Sphere(Point(0f, 0f, 0f), 5000f, Dielectric(1.5f))
+
+        val world = HittableList(
+            mutableListOf(
+                BvhNode(HittableList(floorBoxes)),
+                Quad(Point(123f, 554f, 147f), Vector(300f, 0f, 0f), Vector(0f, 0f, 265f), DiffuseLight(Color(7f, 7f, 7f))),
+                Sphere(Point(400f, 400f, 200f), Point(430f, 400f, 200f), 50f, Lambertian(Color(0.7f, 0.3f, 0.1f))),
+                Sphere(Point(260f, 150f, 45f), 50f, Dielectric(1.5f)),
+                Sphere(Point(0f, 150f, 145f), 50f, Metal(Color(0.8f, 0.8f, 0.9f), 1.0f)),
+                blueFogBoundary,
+                ConstantMedium(blueFogBoundary, 0.2f, Color(0.2f, 0.4f, 0.9f)),
+                ConstantMedium(hazeBoundary, 0.0001f, Color(1f, 1f, 1f)),
+                Sphere(Point(400f, 200f, 400f), 100f, Lambertian(ImageTexture("earthmap.jpg"))),
+                Sphere(Point(220f, 280f, 300f), 80f, Lambertian(NoiseTexture(0.2f))),
+                Translate(RotateY(BvhNode(HittableList(spheresInBlock)), 15.0f), Vector(-100f, 270f, 395f))
+            )
+        )
+
+        return SceneDefinition(
+            name = "final-week",
+            world = world,
+            camera = Camera().apply {
+                aspectRatio = 1.0f
+                imageWidth = width
+                samplesPerPixel = samples
+                maxReflectionDepth = 40
+                background = Color(0f, 0f, 0f)
+                vfov = 40.0f
+                lookFrom = Point(478f, 278f, -600f)
+                lookAt = Point(278f, 278f, 0f)
+                vUp = Vector(0f, 1f, 0f)
+                defocusAngle = 0f
+            }
         )
     }
 
