@@ -33,6 +33,13 @@ data class Aabb(
         z = if (z.size() >= minimum) z else z.expand(minimum)
     )
 
+    /** The same box, moved; instances need it to keep the BVH honest. */
+    operator fun plus(offset: Vector): Aabb = Aabb(
+        x = Interval(x.min + offset.x, x.max + offset.x),
+        y = Interval(y.min + offset.y, y.max + offset.y),
+        z = Interval(z.min + offset.z, z.max + offset.z)
+    )
+
     fun axisInterval(axis: Int): Interval = when (axis) {
         1 -> y
         2 -> z

@@ -12,6 +12,9 @@ import rayTraceTypescript.objects.HittableList
 import rayTraceTypescript.objects.Hittable
 import rayTraceTypescript.objects.MeshLoader
 import rayTraceTypescript.objects.Quad
+import rayTraceTypescript.objects.RotateY
+import rayTraceTypescript.objects.Translate
+import rayTraceTypescript.objects.box
 import rayTraceTypescript.objects.Sphere
 import rayTraceTypescript.randomWorld
 import rayTraceTypescript.textures.CheckerTexture
@@ -31,6 +34,7 @@ object BookScenes {
         "quads" to { quads() },
         "simple-light" to { simpleLight() },
         "cornell-box" to { cornellBox() },
+        "cornell-blocks" to { cornellBlocks() },
         "model" to { model() }
     )
 
@@ -189,6 +193,24 @@ object BookScenes {
                 vUp = Vector(0f, 1f, 0f)
                 defocusAngle = 0f
             }
+        )
+    }
+
+    /** The Next Week, chapter 8.2: the Cornell box with two rotated, translated blocks. */
+    fun cornellBlocks(samples: Int = 200, width: Int = 600): SceneDefinition {
+        val white = Lambertian(Color(0.73f, 0.73f, 0.73f))
+        val tall = Translate(
+            RotateY(box(Point(0f, 0f, 0f), Point(165f, 330f, 165f), white), 15.0f),
+            Vector(265f, 0f, 295f)
+        )
+        val short = Translate(
+            RotateY(box(Point(0f, 0f, 0f), Point(165f, 165f, 165f), white), -18.0f),
+            Vector(130f, 0f, 65f)
+        )
+        return SceneDefinition(
+            name = "cornell-blocks",
+            world = cornellBox(listOf(tall, short), samples, width).world,
+            camera = cornellBox(listOf(), samples, width).camera
         )
     }
 

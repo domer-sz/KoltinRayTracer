@@ -41,7 +41,7 @@ class Quad(val q: Point, val u: Vector, val v: Vector, val material: Material) :
         val beta = Vector.dotProduct(w, Vector.cross(u, planarHit))
         if (!UNIT.contains(alpha) || !UNIT.contains(beta)) return null
 
-        return Hit(ray, intersection, normal, material, t, alpha, beta)
+        return Hit.facing(ray, intersection, normal, material, t, alpha, beta)
     }
 
     override fun aabbBoundingBox(): Aabb = bbox

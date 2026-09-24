@@ -12,6 +12,9 @@ import rayTraceTypescript.objects.BvhNode
 import rayTraceTypescript.objects.Hittable
 import rayTraceTypescript.objects.HittableList
 import rayTraceTypescript.objects.Quad
+import rayTraceTypescript.objects.RotateY
+import rayTraceTypescript.objects.Translate
+import rayTraceTypescript.objects.box
 import rayTraceTypescript.objects.Sphere
 import rayTraceTypescript.objects.Mesh
 import rayTraceTypescript.render.CpuRenderer
@@ -36,6 +39,12 @@ class GpuCpuComparisonTest {
     fun `gpu matches the cpu render for every material`() {
         assumeOpenCl()
         assertLooksTheSame(materialsScene())
+    }
+
+    @Test
+    fun `gpu matches the cpu render for rotated and translated instances`() {
+        assumeOpenCl()
+        assertLooksTheSame(instanceScene(), lit = true)
     }
 
     @Test
@@ -137,6 +146,25 @@ class GpuCpuComparisonTest {
         val glass = Sphere(Point(1.6f, 0.5f, 0.4f), 0.5f, Dielectric(1.5f))
         return HittableList(mutableListOf(BvhNode(HittableList(mutableListOf(ground, moving, metal, glass)))))
     }
+
+    /**
+     * A block spun and moved by the instance wrappers. The CPU transforms rays at traversal
+     * time and the GPU bakes the same transform into the quads, so this is where the two
+     * approaches have to agree.
+     */
+    private fun instanceScene(): Hittable = HittableList(
+        mutableListOf(
+            Sphere(Point(0.0f, -1000.0f, 0.0f), 1000.0f, Lambertian(Color(0.6f, 0.6f, 0.62f))),
+            Translate(
+                RotateY(box(Point(0f, 0f, 0f), Point(1.2f, 1.2f, 1.2f), Lambertian(Color(0.75f, 0.35f, 0.2f))), 27.0f),
+                Vector(-0.4f, 0.0f, -0.3f)
+            ),
+            Quad(
+                Point(-1.5f, 3.0f, -1.5f), Vector(3.0f, 0.0f, 0.0f), Vector(0.0f, 0.0f, 3.0f),
+                DiffuseLight(Color(6.0f, 6.0f, 6.0f))
+            )
+        )
+    )
 
     /** A dark room where the only light is an emissive quad above a diffuse sphere. */
     private fun lightScene(): Hittable = HittableList(

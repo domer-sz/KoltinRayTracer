@@ -44,7 +44,7 @@ class Triangle(val v0: Point, val v1: Point, val v2: Point, val material: Materi
         if (!rayT.surrounds(t)) return null
 
         val outwardNormal = Vector.unit(Vector.cross(edge1, edge2))
-        return Hit(ray, ray.at(t), outwardNormal, material, t, u, v)
+        return Hit.facing(ray, ray.at(t), outwardNormal, material, t, u, v)
     }
 
     override fun aabbBoundingBox(): Aabb = bbox

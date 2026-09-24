@@ -1,6 +1,8 @@
 package rayTraceTypescript.gpu
 
 import rayTraceTypescript.Color
+import rayTraceTypescript.Point
+import rayTraceTypescript.Vector
 import rayTraceTypescript.materials.Dielectric
 import rayTraceTypescript.materials.DiffuseLight
 import rayTraceTypescript.materials.Lambertian
@@ -10,6 +12,8 @@ import rayTraceTypescript.objects.BvhNode
 import rayTraceTypescript.objects.Hittable
 import rayTraceTypescript.objects.HittableList
 import rayTraceTypescript.objects.Quad
+import rayTraceTypescript.objects.RotateY
+import rayTraceTypescript.objects.Translate
 import rayTraceTypescript.objects.Sphere
 import rayTraceTypescript.objects.Triangle
 import rayTraceTypescript.textures.CheckerTexture
@@ -58,7 +62,7 @@ class SceneFlattener private constructor() {
     }
 
     private fun build(world: Hittable): SceneBuffers {
-        val root = emit(world, depth = 1)
+        val root = emit(world, depth = 1, transform = Transform.IDENTITY)
         require(maxDepth <= SceneBuffers.MAX_TRAVERSAL_DEPTH) {
             "Scene tree is $maxDepth levels deep, kernel stack holds ${SceneBuffers.MAX_TRAVERSAL_DEPTH}"
         }
@@ -83,31 +87,45 @@ class SceneFlattener private constructor() {
         )
     }
 
-    private fun emit(hittable: Hittable, depth: Int): Int {
+    private fun emit(hittable: Hittable, depth: Int, transform: Transform): Int {
         if (depth > maxDepth) maxDepth = depth
         return when (hittable) {
-            is Sphere -> emitSphere(hittable)
-            is Triangle -> emitTriangle(hittable)
-            is Quad -> emitQuad(hittable)
+            is Sphere -> emitSphere(hittable, transform)
+            is Triangle -> emitTriangle(hittable, transform)
+            is Quad -> emitQuad(hittable, transform)
+            // Instances fold into the primitives below them instead of becoming nodes.
+            is Translate -> emit(hittable.obj, depth, transform.after(Transform.translation(hittable.offset)))
+            is RotateY -> emit(hittable.obj, depth, transform.after(Transform.rotation(hittable.cosTheta, hittable.sinTheta)))
             is BvhNode ->
                 // A one-object BVH node stores the same child twice; testing it once is enough.
-                if (hittable.left === hittable.right) emit(hittable.left, depth)
-                else emitInner(emit(hittable.left, depth + 1), emit(hittable.right, depth + 1))
+                if (hittable.left === hittable.right) emit(hittable.left, depth, transform)
+                else emitInner(
+                    emit(hittable.left, depth + 1, transform),
+                    emit(hittable.right, depth + 1, transform)
+                )
             is HittableList -> {
                 require(hittable.objects.isNotEmpty()) { "Cannot render an empty world" }
-                emitRange(hittable.objects, 0, hittable.objects.size, depth)
+                emitRange(hittable.objects, 0, hittable.objects.size, depth, transform)
             }
             else -> throw IllegalArgumentException("Unsupported hittable for GPU rendering: ${hittable::class.java.name}")
         }
     }
 
-    private fun emitRange(objects: List<Hittable>, start: Int, end: Int, depth: Int): Int {
-        if (end - start == 1) return emit(objects[start], depth)
+    private fun emitRange(objects: List<Hittable>, start: Int, end: Int, depth: Int, transform: Transform): Int {
+        if (end - start == 1) return emit(objects[start], depth, transform)
         val mid = (start + end) / 2
-        return emitInner(emitRange(objects, start, mid, depth + 1), emitRange(objects, mid, end, depth + 1))
+        return emitInner(
+            emitRange(objects, start, mid, depth + 1, transform),
+            emitRange(objects, mid, end, depth + 1, transform)
+        )
     }
 
-    private fun emitQuad(quad: Quad): Int {
+    private fun emitQuad(original: Quad, transform: Transform): Int {
+        // Rebuilding the quad from transformed corners lets its own constructor work out the
+        // plane, the uv basis and the padded box again.
+        val quad = if (transform === Transform.IDENTITY) original
+        else Quad(transform.point(original.q), transform.vector(original.u), transform.vector(original.v), original.material)
+
         val index = quadMaterials.size
         for (vector in listOf(quad.q, quad.u, quad.v, quad.w, quad.normal)) {
             quads.add(vector.x)
@@ -125,7 +143,13 @@ class SceneFlattener private constructor() {
         )
     }
 
-    private fun emitTriangle(triangle: Triangle): Int {
+    private fun emitTriangle(original: Triangle, transform: Transform): Int {
+        val triangle = if (transform === Transform.IDENTITY) original
+        else Triangle(
+            transform.point(original.v0), transform.point(original.v1), transform.point(original.v2),
+            original.material
+        )
+
         val index = triangleMaterials.size
         for (component in listOf(triangle.v0, triangle.edge1, triangle.edge2)) {
             triangles.add(component.x)
@@ -143,22 +167,28 @@ class SceneFlattener private constructor() {
         )
     }
 
-    private fun emitSphere(sphere: Sphere): Int {
+    private fun emitSphere(sphere: Sphere, transform: Transform): Int {
         val sphereIndex = sphereMaterials.size
-        val center = sphere.center
-        spheres.add(center.origin.x)
-        spheres.add(center.origin.y)
-        spheres.add(center.origin.z)
-        spheres.add(center.direction.x)
-        spheres.add(center.direction.y)
-        spheres.add(center.direction.z)
-        spheres.add(sphere.radius)
+        // A sphere is round: a rotation only moves its centre, so the radius survives untouched.
+        val start = transform.point(sphere.center.origin)
+        val end = transform.point(sphere.center.at(1.0f))
+        val radius = sphere.radius
+
+        spheres.add(start.x)
+        spheres.add(start.y)
+        spheres.add(start.z)
+        spheres.add(end.x - start.x)
+        spheres.add(end.y - start.y)
+        spheres.add(end.z - start.z)
+        spheres.add(radius)
         spheres.add(0.0f)
         sphereMaterials.add(registerMaterial(sphere.material))
 
-        val box = sphere.aabbBoundingBox()
         return emitNode(
-            floatArrayOf(box.x.min, box.y.min, box.z.min, box.x.max, box.y.max, box.z.max),
+            floatArrayOf(
+                minOf(start.x, end.x) - radius, minOf(start.y, end.y) - radius, minOf(start.z, end.z) - radius,
+                maxOf(start.x, end.x) + radius, maxOf(start.y, end.y) + radius, maxOf(start.z, end.z) + radius
+            ),
             sphereIndex,
             SceneBuffers.LEAF_SPHERE
         )
