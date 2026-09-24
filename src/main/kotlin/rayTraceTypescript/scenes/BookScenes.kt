@@ -10,6 +10,7 @@ import rayTraceTypescript.objects.BvhNode
 import rayTraceTypescript.objects.HittableList
 import rayTraceTypescript.objects.Hittable
 import rayTraceTypescript.objects.MeshLoader
+import rayTraceTypescript.objects.Quad
 import rayTraceTypescript.objects.Sphere
 import rayTraceTypescript.randomWorld
 import rayTraceTypescript.textures.CheckerTexture
@@ -26,6 +27,7 @@ object BookScenes {
         "bouncing-spheres" to { bouncingSpheres() },
         "earth" to { earth() },
         "perlin-spheres" to { perlinSpheres() },
+        "quads" to { quads() },
         "model" to { model() }
     )
 
@@ -79,6 +81,39 @@ object BookScenes {
                 maxReflectionDepth = 50
                 vfov = 20.0f
                 lookFrom = Point(13f, 2f, 3f)
+                lookAt = Point(0f, 0f, 0f)
+                vUp = Vector(0f, 1f, 0f)
+                defocusAngle = 0f
+            }
+        )
+    }
+
+    /** The Next Week, chapter 6: five quads seen from inside the box they half enclose. */
+    fun quads(): SceneDefinition {
+        val red = Lambertian(Color(1.0f, 0.2f, 0.2f))
+        val green = Lambertian(Color(0.2f, 1.0f, 0.2f))
+        val blue = Lambertian(Color(0.2f, 0.2f, 1.0f))
+        val orange = Lambertian(Color(1.0f, 0.5f, 0.0f))
+        val teal = Lambertian(Color(0.2f, 0.8f, 0.8f))
+
+        return SceneDefinition(
+            name = "quads",
+            world = HittableList(
+                mutableListOf(
+                    Quad(Point(-3f, -2f, 5f), Vector(0f, 0f, -4f), Vector(0f, 4f, 0f), red),
+                    Quad(Point(-2f, -2f, 0f), Vector(4f, 0f, 0f), Vector(0f, 4f, 0f), green),
+                    Quad(Point(3f, -2f, 1f), Vector(0f, 0f, 4f), Vector(0f, 4f, 0f), blue),
+                    Quad(Point(-2f, 3f, 1f), Vector(4f, 0f, 0f), Vector(0f, 0f, 4f), orange),
+                    Quad(Point(-2f, -3f, 5f), Vector(4f, 0f, 0f), Vector(0f, 0f, -4f), teal)
+                )
+            ),
+            camera = Camera().apply {
+                aspectRatio = 1.0f
+                imageWidth = 400
+                samplesPerPixel = 100
+                maxReflectionDepth = 50
+                vfov = 80.0f
+                lookFrom = Point(0f, 0f, 9f)
                 lookAt = Point(0f, 0f, 0f)
                 vUp = Vector(0f, 1f, 0f)
                 defocusAngle = 0f

@@ -4,6 +4,7 @@
 
 #define LEAF_SPHERE   (-1)
 #define LEAF_TRIANGLE (-2)
+#define LEAF_QUAD     (-3)
 #define TRIANGLE_PARALLEL_EPSILON 1e-8f
 #define STACK_SIZE    64
 #define REJECTION_CAP 64
@@ -179,11 +180,45 @@ inline bool triangle_hit(__global const float* triangles, __global const int* tr
     return true;
 }
 
+// Quad.hit: intersect the plane, then express the hit in the quad's own u/v basis.
+inline bool quad_hit(__global const float* quads, __global const int* quadMaterials, int index,
+                     float3 origin, float3 direction, float tMin, float tMax, HitRecord* rec) {
+    __global const float* data = quads + index * 16;
+    float3 Q = (float3)(data[0], data[1], data[2]);
+    float3 u = (float3)(data[3], data[4], data[5]);
+    float3 v = (float3)(data[6], data[7], data[8]);
+    float3 w = (float3)(data[9], data[10], data[11]);
+    float3 normal = (float3)(data[12], data[13], data[14]);
+    float D = data[15];
+
+    float denominator = dot(normal, direction);
+    if (fabs(denominator) < TRIANGLE_PARALLEL_EPSILON) return false;
+
+    float t = (D - dot(normal, origin)) / denominator;
+    if (!(t >= tMin && t <= tMax)) return false;
+
+    float3 intersection = origin + t * direction;
+    float3 planarHit = intersection - Q;
+    float alpha = dot(w, cross(planarHit, v));
+    float beta = dot(w, cross(u, planarHit));
+    if (alpha < 0.0f || alpha > 1.0f || beta < 0.0f || beta > 1.0f) return false;
+
+    rec->point = intersection;
+    rec->t = t;
+    rec->u = alpha;
+    rec->v = beta;
+    rec->material = quadMaterials[index];
+    rec->frontFace = dot(direction, normal) < 0.0f;
+    rec->normal = rec->frontFace ? normal : -normal;
+    return true;
+}
+
 // Closest hit over the flattened tree; equivalent to BvhNode.hit narrowing the interval
 // as it descends.
 inline bool world_hit(__global const float* nodeBounds, __global const int* nodeLinks,
                       __global const float* spheres, __global const int* sphereMaterials,
                       __global const float* triangles, __global const int* triangleMaterials,
+                      __global const float* quads, __global const int* quadMaterials,
                       int rootNode, float3 origin, float3 direction, float time,
                       float tMin, float tMax, HitRecord* rec) {
     int stack[STACK_SIZE];
@@ -200,11 +235,16 @@ inline bool world_hit(__global const float* nodeBounds, __global const int* node
         int first = nodeLinks[node * 2];
         int second = nodeLinks[node * 2 + 1];
 
-        if (second == LEAF_SPHERE || second == LEAF_TRIANGLE) {
+        if (second < 0) {
             HitRecord candidate;
-            bool hit = second == LEAF_SPHERE
-                ? sphere_hit(spheres, sphereMaterials, first, origin, direction, time, tMin, closest, &candidate)
-                : triangle_hit(triangles, triangleMaterials, first, origin, direction, tMin, closest, &candidate);
+            bool hit = false;
+            if (second == LEAF_SPHERE) {
+                hit = sphere_hit(spheres, sphereMaterials, first, origin, direction, time, tMin, closest, &candidate);
+            } else if (second == LEAF_TRIANGLE) {
+                hit = triangle_hit(triangles, triangleMaterials, first, origin, direction, tMin, closest, &candidate);
+            } else if (second == LEAF_QUAD) {
+                hit = quad_hit(quads, quadMaterials, first, origin, direction, tMin, closest, &candidate);
+            }
             if (hit) {
                 hitAnything = true;
                 closest = candidate.t;
@@ -399,6 +439,8 @@ __kernel void render(__global const float* cam,
                      __global const int* sphereMaterials,
                      __global const float* triangles,
                      __global const int* triangleMaterials,
+                     __global const float* quads,
+                     __global const int* quadMaterials,
                      __global const int* matI,
                      __global const float* matF,
                      __global const int* texI,
@@ -457,7 +499,7 @@ __kernel void render(__global const float* cam,
         for (int depth = 0; depth < maxReflectionDepth; depth++) {
             HitRecord rec;
             if (world_hit(nodeBounds, nodeLinks, spheres, sphereMaterials, triangles, triangleMaterials,
-                          rootNode, origin, direction, time, 0.001f, INFINITY, &rec)) {
+                          quads, quadMaterials, rootNode, origin, direction, time, 0.001f, INFINITY, &rec)) {
                 float3 attenuation;
                 float3 scattered;
                 if (!scatter(matI, matF, texI, texF, images, perlinVectors, perlinPermutations,

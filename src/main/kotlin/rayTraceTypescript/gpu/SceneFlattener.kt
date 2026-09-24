@@ -8,6 +8,7 @@ import rayTraceTypescript.materials.Metal
 import rayTraceTypescript.objects.BvhNode
 import rayTraceTypescript.objects.Hittable
 import rayTraceTypescript.objects.HittableList
+import rayTraceTypescript.objects.Quad
 import rayTraceTypescript.objects.Sphere
 import rayTraceTypescript.objects.Triangle
 import rayTraceTypescript.textures.CheckerTexture
@@ -34,6 +35,8 @@ class SceneFlattener private constructor() {
     private val sphereMaterials = ArrayList<Int>()
     private val triangles = ArrayList<Float>()
     private val triangleMaterials = ArrayList<Int>()
+    private val quads = ArrayList<Float>()
+    private val quadMaterials = ArrayList<Int>()
     private val materialInts = ArrayList<Int>()
     private val materialFloats = ArrayList<Float>()
     private val textureInts = ArrayList<Int>()
@@ -65,6 +68,8 @@ class SceneFlattener private constructor() {
             sphereMaterials = sphereMaterials.toIntArray(),
             triangles = triangles.toFloatArray(),
             triangleMaterials = triangleMaterials.toIntArray(),
+            quads = quads.toFloatArray(),
+            quadMaterials = quadMaterials.toIntArray(),
             materialInts = materialInts.toIntArray(),
             materialFloats = materialFloats.toFloatArray(),
             textureInts = textureInts.toIntArray(),
@@ -82,6 +87,7 @@ class SceneFlattener private constructor() {
         return when (hittable) {
             is Sphere -> emitSphere(hittable)
             is Triangle -> emitTriangle(hittable)
+            is Quad -> emitQuad(hittable)
             is BvhNode ->
                 // A one-object BVH node stores the same child twice; testing it once is enough.
                 if (hittable.left === hittable.right) emit(hittable.left, depth)
@@ -98,6 +104,24 @@ class SceneFlattener private constructor() {
         if (end - start == 1) return emit(objects[start], depth)
         val mid = (start + end) / 2
         return emitInner(emitRange(objects, start, mid, depth + 1), emitRange(objects, mid, end, depth + 1))
+    }
+
+    private fun emitQuad(quad: Quad): Int {
+        val index = quadMaterials.size
+        for (vector in listOf(quad.q, quad.u, quad.v, quad.w, quad.normal)) {
+            quads.add(vector.x)
+            quads.add(vector.y)
+            quads.add(vector.z)
+        }
+        quads.add(quad.d)
+        quadMaterials.add(registerMaterial(quad.material))
+
+        val box = quad.aabbBoundingBox()
+        return emitNode(
+            floatArrayOf(box.x.min, box.y.min, box.z.min, box.x.max, box.y.max, box.z.max),
+            index,
+            SceneBuffers.LEAF_QUAD
+        )
     }
 
     private fun emitTriangle(triangle: Triangle): Int {

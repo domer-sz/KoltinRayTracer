@@ -10,6 +10,7 @@ import rayTraceTypescript.materials.Metal
 import rayTraceTypescript.objects.BvhNode
 import rayTraceTypescript.objects.Hittable
 import rayTraceTypescript.objects.HittableList
+import rayTraceTypescript.objects.Quad
 import rayTraceTypescript.objects.Sphere
 import rayTraceTypescript.objects.Mesh
 import rayTraceTypescript.render.CpuRenderer
@@ -34,6 +35,12 @@ class GpuCpuComparisonTest {
     fun `gpu matches the cpu render for every material`() {
         assumeOpenCl()
         assertLooksTheSame(materialsScene())
+    }
+
+    @Test
+    fun `gpu matches the cpu render for quads`() {
+        assumeOpenCl()
+        assertLooksTheSame(quadScene())
     }
 
     @Test
@@ -123,6 +130,26 @@ class GpuCpuComparisonTest {
         val glass = Sphere(Point(1.6f, 0.5f, 0.4f), 0.5f, Dielectric(1.5f))
         return HittableList(mutableListOf(BvhNode(HittableList(mutableListOf(ground, moving, metal, glass)))))
     }
+
+    /**
+     * A quad floor with an upright quad standing on it, both seen at a glancing angle.
+     * The floor sits at y = 0.2 rather than y = 0 on purpose: a checker cell boundary runs
+     * through y = 0, and there the pattern's parity is decided by the last bit of the hit
+     * point, which two renderers have no reason to agree on.
+     */
+    private fun quadScene(): Hittable = HittableList(
+        mutableListOf(
+            Quad(
+                Point(-6.0f, 0.2f, -6.0f), Vector(12.0f, 0.0f, 0.0f), Vector(0.0f, 0.0f, 12.0f),
+                Lambertian(CheckerTexture(0.5f, Color(0.2f, 0.3f, 0.1f), Color(0.9f, 0.9f, 0.9f)))
+            ),
+            Quad(
+                Point(-1.0f, 0.2f, 0.0f), Vector(2.0f, 0.0f, 0.0f), Vector(0.0f, 2.0f, 0.0f),
+                Lambertian(Color(0.8f, 0.3f, 0.2f))
+            ),
+            Sphere(Point(1.6f, 0.6f, 1.2f), 0.6f, Metal(Color(0.8f, 0.8f, 0.85f), 0.1f))
+        )
+    )
 
     /** The marble texture, which the GPU reads from the same lattice the CPU built. */
     private fun noiseScene(): Hittable {
