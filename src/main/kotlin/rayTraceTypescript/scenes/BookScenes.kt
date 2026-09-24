@@ -4,6 +4,7 @@ import rayTraceTypescript.Camera
 import rayTraceTypescript.Color
 import rayTraceTypescript.Point
 import rayTraceTypescript.Vector
+import rayTraceTypescript.materials.DiffuseLight
 import rayTraceTypescript.materials.Lambertian
 import rayTraceTypescript.materials.Material
 import rayTraceTypescript.objects.BvhNode
@@ -28,6 +29,8 @@ object BookScenes {
         "earth" to { earth() },
         "perlin-spheres" to { perlinSpheres() },
         "quads" to { quads() },
+        "simple-light" to { simpleLight() },
+        "cornell-box" to { cornellBox() },
         "model" to { model() }
     )
 
@@ -115,6 +118,74 @@ object BookScenes {
                 vfov = 80.0f
                 lookFrom = Point(0f, 0f, 9f)
                 lookAt = Point(0f, 0f, 0f)
+                vUp = Vector(0f, 1f, 0f)
+                defocusAngle = 0f
+            }
+        )
+    }
+
+    /** The Next Week, chapter 7: the first scene lit by its own geometry rather than the sky. */
+    fun simpleLight(): SceneDefinition {
+        val marble = Lambertian(NoiseTexture(4.0f))
+        val light = DiffuseLight(Color(4f, 4f, 4f))     // brighter than white, so it lights the room
+        return SceneDefinition(
+            name = "simple-light",
+            world = HittableList(
+                mutableListOf(
+                    Sphere(Point(0f, -1000f, 0f), 1000f, marble),
+                    Sphere(Point(0f, 2f, 0f), 2f, marble),
+                    Sphere(Point(0f, 7f, 0f), 2f, light),
+                    Quad(Point(3f, 1f, 0f), Vector(2f, 0f, 0f), Vector(0f, 2f, 0f), light)
+                )
+            ),
+            camera = Camera().apply {
+                aspectRatio = 16.0f / 9.0f
+                imageWidth = 400
+                samplesPerPixel = 100
+                maxReflectionDepth = 50
+                background = Color(0f, 0f, 0f)
+                vfov = 20.0f
+                lookFrom = Point(26f, 3f, 6f)
+                lookAt = Point(0f, 2f, 0f)
+                vUp = Vector(0f, 1f, 0f)
+                defocusAngle = 0f
+            }
+        )
+    }
+
+    /** The Next Week, chapter 7.4: the Cornell box, empty for now. */
+    fun cornellBox(
+        contents: List<Hittable> = emptyList(),
+        samples: Int = 200,
+        width: Int = 600
+    ): SceneDefinition {
+        val red = Lambertian(Color(0.65f, 0.05f, 0.05f))
+        val white = Lambertian(Color(0.73f, 0.73f, 0.73f))
+        val green = Lambertian(Color(0.12f, 0.45f, 0.15f))
+        val light = DiffuseLight(Color(15f, 15f, 15f))
+
+        val walls = mutableListOf<Hittable>(
+            Quad(Point(555f, 0f, 0f), Vector(0f, 555f, 0f), Vector(0f, 0f, 555f), green),
+            Quad(Point(0f, 0f, 0f), Vector(0f, 555f, 0f), Vector(0f, 0f, 555f), red),
+            Quad(Point(343f, 554f, 332f), Vector(-130f, 0f, 0f), Vector(0f, 0f, -105f), light),
+            Quad(Point(0f, 0f, 0f), Vector(555f, 0f, 0f), Vector(0f, 0f, 555f), white),
+            Quad(Point(555f, 555f, 555f), Vector(-555f, 0f, 0f), Vector(0f, 0f, -555f), white),
+            Quad(Point(0f, 0f, 555f), Vector(555f, 0f, 0f), Vector(0f, 555f, 0f), white)
+        )
+        walls.addAll(contents)
+
+        return SceneDefinition(
+            name = "cornell-box",
+            world = HittableList(walls),
+            camera = Camera().apply {
+                aspectRatio = 1.0f
+                imageWidth = width
+                samplesPerPixel = samples
+                maxReflectionDepth = 50
+                background = Color(0f, 0f, 0f)
+                vfov = 40.0f
+                lookFrom = Point(278f, 278f, -800f)
+                lookAt = Point(278f, 278f, 0f)
                 vUp = Vector(0f, 1f, 0f)
                 defocusAngle = 0f
             }

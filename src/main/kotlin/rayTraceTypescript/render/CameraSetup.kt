@@ -1,5 +1,6 @@
 package rayTraceTypescript.render
 
+import rayTraceTypescript.Color
 import rayTraceTypescript.Point
 import rayTraceTypescript.Vector
 
@@ -18,6 +19,7 @@ data class CameraSetup(
     val pixelDeltaU: Vector,
     val pixelDeltaV: Vector,
     val defocusAngle: Float,
+    val background: Color? = null,
     val defocusDiscU: Vector,
     val defocusDiscV: Vector
 ) {

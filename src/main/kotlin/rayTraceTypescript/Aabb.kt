@@ -74,7 +74,11 @@ data class Aabb(
             if (t0 > tMin) tMin = t0
             if (t1 < tMax) tMax = t1
 
-            if (tMax <= tMin) return false
+            // Strictly less, not "less or equal": these are floats, and for a padded flat box
+            // far from the ray origin both slab crossings round to the same t (a quad at
+            // z = 555 seen from z = -800 lands on t = 1355 twice). Rejecting that would make
+            // the primitive invisible behind its own bounding box.
+            if (tMax < tMin) return false
         }
 
         return true

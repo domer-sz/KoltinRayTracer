@@ -144,7 +144,12 @@ class GpuRenderer : Renderer {
         setup.pixelDeltaV.x, setup.pixelDeltaV.y, setup.pixelDeltaV.z,
         setup.defocusDiscU.x, setup.defocusDiscU.y, setup.defocusDiscU.z,
         setup.defocusDiscV.x, setup.defocusDiscV.y, setup.defocusDiscV.z,
-        setup.defocusAngle
+        setup.defocusAngle,
+        // A scene without a background colour keeps the sky gradient.
+        if (setup.background == null) 0.0f else 1.0f,
+        setup.background?.r ?: 0.0f,
+        setup.background?.g ?: 0.0f,
+        setup.background?.b ?: 0.0f
     )
 
     companion object {

@@ -11,7 +11,8 @@ package rayTraceTypescript.gpu
  *  - [triangles]: 12 floats per facet - first vertex (3), two edges (3 + 3), unused (3)
  *  - [quads]: 16 floats - corner (3), the two edges (3 + 3), the basis vector w (3),
  *    the plane normal (3) and its offset
- *  - [materialInts]: 2 ints per material - type (0 Lambertian, 1 Metal, 2 Dielectric), texture index
+ *  - [materialInts]: 2 ints per material - type (0 Lambertian, 1 Metal, 2 Dielectric,
+ *    3 DiffuseLight), texture index
  *  - [materialFloats]: 2 floats per material - fuzz, refraction index
  *  - [textureInts]: 4 ints per texture - type (0 solid, 1 checker, 2 image, 3 missing image) + payload
  *  - [textureFloats]: 4 floats per texture - solid rgb, the checker's inverted scale, or a

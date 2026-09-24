@@ -5,6 +5,7 @@ import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.junit.jupiter.api.Test
 import rayTraceTypescript.gpu.GpuRenderer
 import rayTraceTypescript.materials.Dielectric
+import rayTraceTypescript.materials.DiffuseLight
 import rayTraceTypescript.materials.Lambertian
 import rayTraceTypescript.materials.Metal
 import rayTraceTypescript.objects.BvhNode
@@ -38,6 +39,12 @@ class GpuCpuComparisonTest {
     }
 
     @Test
+    fun `gpu matches the cpu render for an emissive scene`() {
+        assumeOpenCl()
+        assertLooksTheSame(lightScene(), lit = true)
+    }
+
+    @Test
     fun `gpu matches the cpu render for quads`() {
         assumeOpenCl()
         assertLooksTheSame(quadScene())
@@ -66,8 +73,8 @@ class GpuCpuComparisonTest {
      * differs. The yardstick is therefore the noise itself: how far the GPU image sits from a
      * CPU image must be no worse than how far two CPU images with different seeds sit apart.
      */
-    private fun assertLooksTheSame(world: Hittable) {
-        val camera = testCamera()
+    private fun assertLooksTheSame(world: Hittable, lit: Boolean = false) {
+        val camera = testCamera().apply { if (lit) background = Color(0f, 0f, 0f) }
         val cpu = render(CpuRenderer(), world, camera, SEED)
         val cpuOtherSeed = render(CpuRenderer(), world, camera, OTHER_SEED)
         val gpu = render(GpuRenderer(), world, camera, SEED)
@@ -130,6 +137,18 @@ class GpuCpuComparisonTest {
         val glass = Sphere(Point(1.6f, 0.5f, 0.4f), 0.5f, Dielectric(1.5f))
         return HittableList(mutableListOf(BvhNode(HittableList(mutableListOf(ground, moving, metal, glass)))))
     }
+
+    /** A dark room where the only light is an emissive quad above a diffuse sphere. */
+    private fun lightScene(): Hittable = HittableList(
+        mutableListOf(
+            Sphere(Point(0.0f, -1000.0f, 0.0f), 1000.0f, Lambertian(Color(0.6f, 0.6f, 0.62f))),
+            Sphere(Point(0.0f, 0.8f, 0.0f), 0.8f, Lambertian(Color(0.75f, 0.35f, 0.2f))),
+            Quad(
+                Point(-1.0f, 2.6f, -1.0f), Vector(2.0f, 0.0f, 0.0f), Vector(0.0f, 0.0f, 2.0f),
+                DiffuseLight(Color(6.0f, 6.0f, 6.0f))
+            )
+        )
+    )
 
     /**
      * A quad floor with an upright quad standing on it, both seen at a glancing angle.

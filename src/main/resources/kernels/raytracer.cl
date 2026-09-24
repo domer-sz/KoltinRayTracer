@@ -99,7 +99,9 @@ inline bool aabb_hit(__global const float* nodeBounds, int node, float3 origin, 
         }
         if (t0 > tMin) tMin = t0;
         if (t1 < tMax) tMax = t1;
-        if (tMax <= tMin) return false;
+        // Strict, for the reason Aabb.hit spells out: a padded flat box far from the origin
+        // has both slab crossings round to the same float.
+        if (tMax < tMin) return false;
     }
     return true;
 }
@@ -382,6 +384,17 @@ inline float3 refract_dir(float3 uv, float3 n, float etaiOverEtat) {
     return rOutPerp + rOutParallel;
 }
 
+/** Light a surface gives off by itself; only DiffuseLight has any. */
+inline float3 material_emitted(__global const int* matI,
+                               __global const int* texI, __global const float* texF,
+                               __global const uchar* images,
+                               __global const float* perlinVectors, __global const int* perlinPermutations,
+                               const HitRecord* rec) {
+    if (matI[rec->material * 2] != 3) return (float3)(0.0f, 0.0f, 0.0f);
+    return texture_value(texI, texF, images, perlinVectors, perlinPermutations,
+                         matI[rec->material * 2 + 1], rec->u, rec->v, rec->point);
+}
+
 inline bool scatter(__global const int* matI, __global const float* matF,
                     __global const int* texI, __global const float* texF,
                     __global const uchar* images,
@@ -390,6 +403,8 @@ inline bool scatter(__global const int* matI, __global const float* matF,
                     float3* attenuation, float3* scattered) {
     int type = matI[rec->material * 2];
     int texture = matI[rec->material * 2 + 1];
+
+    if (type == 3) return false;                          // DiffuseLight: the path ends here
 
     if (type == 0) {                                      // Lambertian
         float3 direction = random_on_hemisphere(rng, rec->normal);
@@ -469,6 +484,8 @@ __kernel void render(__global const float* cam,
     float3 defocusDiscU = (float3)(cam[12], cam[13], cam[14]);
     float3 defocusDiscV = (float3)(cam[15], cam[16], cam[17]);
     float defocusAngle  = cam[18];
+    bool flatBackground = cam[19] > 0.5f;
+    float3 background   = (float3)(cam[20], cam[21], cam[22]);
 
     float3 pixelColor = (float3)(0.0f, 0.0f, 0.0f);
 
@@ -500,6 +517,8 @@ __kernel void render(__global const float* cam,
             HitRecord rec;
             if (world_hit(nodeBounds, nodeLinks, spheres, sphereMaterials, triangles, triangleMaterials,
                           quads, quadMaterials, rootNode, origin, direction, time, 0.001f, INFINITY, &rec)) {
+                sampleColor += throughput * material_emitted(matI, texI, texF, images,
+                                                             perlinVectors, perlinPermutations, &rec);
                 float3 attenuation;
                 float3 scattered;
                 if (!scatter(matI, matF, texI, texF, images, perlinVectors, perlinPermutations,
@@ -510,11 +529,14 @@ __kernel void render(__global const float* cam,
                 origin = rec.point;
                 direction = scattered;
             } else {
-                float3 unitDirection = direction / length(direction);
-                float alpha = 0.5f * (unitDirection.y + 1.0f);
-                float3 background = (float3)(1.0f, 1.0f, 1.0f) * (1.0f - alpha)
-                                  + (float3)(0.5f, 0.7f, 1.0f) * alpha;
-                sampleColor = throughput * background;
+                float3 escaped = background;
+                if (!flatBackground) {
+                    float3 unitDirection = direction / length(direction);
+                    float alpha = 0.5f * (unitDirection.y + 1.0f);
+                    escaped = (float3)(1.0f, 1.0f, 1.0f) * (1.0f - alpha)
+                            + (float3)(0.5f, 0.7f, 1.0f) * alpha;
+                }
+                sampleColor += throughput * escaped;
                 break;
             }
         }

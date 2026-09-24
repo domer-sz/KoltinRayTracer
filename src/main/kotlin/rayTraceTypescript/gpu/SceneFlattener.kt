@@ -2,6 +2,7 @@ package rayTraceTypescript.gpu
 
 import rayTraceTypescript.Color
 import rayTraceTypescript.materials.Dielectric
+import rayTraceTypescript.materials.DiffuseLight
 import rayTraceTypescript.materials.Lambertian
 import rayTraceTypescript.materials.Material
 import rayTraceTypescript.materials.Metal
@@ -196,6 +197,12 @@ class SceneFlattener private constructor() {
                 materialInts.add(1)
                 materialInts.add(registerColor(material.albedo))
                 materialFloats.add(material.fuzz)
+                materialFloats.add(0.0f)
+            }
+            is DiffuseLight -> {
+                materialInts.add(3)
+                materialInts.add(registerTexture(material.texture))
+                materialFloats.add(0.0f)
                 materialFloats.add(0.0f)
             }
             is Dielectric -> {

@@ -26,7 +26,7 @@ class CpuRenderer : Renderer {
                 repeat(setup.samplesPerPixel) {
                     numberOfRays++
                     val ray = getRay(x.toFloat(), y.toFloat(), setup)
-                    val sampleColor = rayColor(ray, setup.maxReflectionDepth, world)
+                    val sampleColor = rayColor(ray, setup.maxReflectionDepth, world, setup)
                     pixelColor += sampleColor
                 }
                 pixelColor *= setup.pixelSamplesScale
@@ -46,19 +46,21 @@ class CpuRenderer : Renderer {
         return numberOfRays
     }
 
-    private fun rayColor(ray: Ray, reflectionDepth: Int, world: Hittable): Color {
+    private fun rayColor(ray: Ray, reflectionDepth: Int, world: Hittable, setup: CameraSetup): Color {
         if (reflectionDepth <= 0) return Color(0.0f, 0.0f, 0.0f)
 
         val hit = world.hit(ray, Interval(0.001f, infinity))
-        if (hit != null) {
-            val scatteredResult = hit.material.scatter(ray, hit)
-            if (scatteredResult != null) {
-                val rec = rayColor(scatteredResult.scattered, reflectionDepth - 1, world)
-                return rec * scatteredResult.albedo
-            }
-            return Color(0.0f, 0.0f, 0.0f)
-        }
+            ?: return setup.background ?: skyGradient(ray)
 
+        val emitted = hit.material.emitted(hit.u, hit.v, hit.point)
+        val scatteredResult = hit.material.scatter(ray, hit) ?: return emitted
+
+        val incoming = rayColor(scatteredResult.scattered, reflectionDepth - 1, world, setup)
+        return emitted + incoming * scatteredResult.albedo
+    }
+
+    /** The blue-to-white sky of the first book, used when a scene sets no background. */
+    private fun skyGradient(ray: Ray): Color {
         val unitDirection = ray.direction.unit()
         val alpha = 0.5f * (unitDirection.y + 1.0f)
         val white = Color(1.0f, 1.0f, 1.0f) * (1.0f - alpha)

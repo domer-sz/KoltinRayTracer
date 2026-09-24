@@ -22,6 +22,9 @@ class Camera {
     var defocusAngle: Float = 0.0f
     var focusDistance: Float = 10.0f
 
+    /** Colour of rays that escape the scene; null keeps the sky gradient of the first book. */
+    var background: Color? = null
+
     /**
      * Renders [world] into [outputPath] and returns the number of primary rays traced.
      * The backend (GPU or CPU) is picked by [RendererFactory]; both share this camera geometry.
@@ -75,6 +78,7 @@ class Camera {
             pixelDeltaU = pixelDeltaU,
             pixelDeltaV = pixelDeltaV,
             defocusAngle = defocusAngle,
+            background = background,
             defocusDiscU = u * defocusRadius,
             defocusDiscV = v * defocusRadius
         )

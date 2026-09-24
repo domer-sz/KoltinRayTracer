@@ -18,9 +18,12 @@ fun main() {
     val scene = BookScenes.byName(System.getProperty("rt.scene", "earth"))
     println("Scene: ${scene.name}")
 
+    // -Drt.out redirects the render, so a quick look does not overwrite the committed image.ppm.
+    val output = java.nio.file.Paths.get(System.getProperty("rt.out", "image.ppm"))
+
     var numberOfRays: Long = 0
     val time = measureTimeMillis {
-        numberOfRays = scene.camera.render(scene.world)
+        numberOfRays = scene.camera.render(scene.world, output)
     }
     printRenderReport(time, numberOfRays)
 }
