@@ -7,7 +7,7 @@ import rayTraceTypescript.objects.BvhNode
 import rayTraceTypescript.objects.Hittable
 import rayTraceTypescript.objects.HittableList
 import rayTraceTypescript.objects.Sphere
-import rayTraceTypescript.objects.StlMesh
+import rayTraceTypescript.objects.MeshLoader
 import rayTraceTypescript.materials.Material
 import rayTraceTypescript.textures.CheckerTexture
 import rayTraceTypescript.textures.ImageTexture
@@ -16,21 +16,26 @@ import kotlin.system.measureTimeMillis
 import kotlin.time.Duration
 
 fun main() {
-    // Scene picker: -Drt.scene=1 spheres, 2 earth (default), 3 an STL model on the floor.
+    // Scene picker: -Drt.scene=1 spheres, 2 earth (default), 3 a 3D model on the floor.
     when (System.getProperty("rt.scene", "2").toIntOrNull() ?: 2) {
         1 -> spheresWorld()
-        3 -> stlModel()
+        3 -> modelScene()
         else -> earth()
     }
 }
 
 /**
- * Renders an STL model standing on the same checkered floor the sphere scene uses.
- * The file comes from -Drt.stl=<path>, the STL_FILE environment variable, or ./model.stl.
+ * Renders a 3D model standing on the same checkered floor the sphere scene uses.
+ * The file comes from -Drt.model=<path>, the MODEL_FILE environment variable, or ./model.stl;
+ * any format [MeshLoader] supports will do.
  */
-private fun stlModel() {
-    val path = System.getProperty("rt.stl") ?: System.getenv("STL_FILE") ?: "model.stl"
-    val world = stlWorld(path)
+private fun modelScene() {
+    val path = System.getProperty("rt.model")
+        ?: System.getProperty("rt.stl")
+        ?: System.getenv("MODEL_FILE")
+        ?: System.getenv("STL_FILE")
+        ?: "model.stl"
+    val world = modelWorld(path)
 
     val camera = Camera()
     camera.aspectRatio = 16.0f / 9.0f
@@ -54,11 +59,11 @@ private fun stlModel() {
 }
 
 /**
- * The default STL setup: the checkered ground of [randomWorld], with the model scaled to a
+ * The default model setup: the checkered ground of [randomWorld], with the mesh scaled to a
  * usable size and resting on it. Every facet goes through a BVH, otherwise a mesh of any size
  * would be traversed one triangle at a time.
  */
-fun stlWorld(
+fun modelWorld(
     path: String,
     material: Material = Lambertian(Color(0.72f, 0.38f, 0.22f))
 ): HittableList {
@@ -66,7 +71,7 @@ fun stlWorld(
     val objects: MutableList<Hittable> = mutableListOf(
         Sphere(Point(0.0f, -1000.0f, 0.0f), 1000.0F, Lambertian(checker))
     )
-    val mesh = StlMesh.load(path).standingOnFloor()
+    val mesh = MeshLoader.load(path).standingOnFloor()
     println("Loaded ${mesh.triangleCount} triangles from $path")
     objects.addAll(mesh.toHittables(material))
     return HittableList(mutableListOf(BvhNode(HittableList(objects))))

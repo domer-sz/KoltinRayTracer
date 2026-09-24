@@ -11,7 +11,7 @@ import rayTraceTypescript.objects.BvhNode
 import rayTraceTypescript.objects.Hittable
 import rayTraceTypescript.objects.HittableList
 import rayTraceTypescript.objects.Sphere
-import rayTraceTypescript.objects.StlMesh
+import rayTraceTypescript.objects.Mesh
 import rayTraceTypescript.render.CpuRenderer
 import rayTraceTypescript.render.Renderer
 import rayTraceTypescript.textures.CheckerTexture
@@ -117,14 +117,14 @@ class GpuCpuComparisonTest {
         return HittableList(mutableListOf(BvhNode(HittableList(mutableListOf(ground, moving, metal, glass)))))
     }
 
-    /** An octahedron standing on the checkered floor, the default STL placement. */
+    /** An octahedron standing on the checkered floor, the default model placement. */
     private fun meshScene(): Hittable {
         val ground = Sphere(
             Point(0.0f, -1000.0f, 0.0f),
             1000.0f,
             Lambertian(CheckerTexture(0.32f, Color(0.2f, 0.3f, 0.1f), Color(0.9f, 0.9f, 0.9f)))
         )
-        val octahedron = StlMesh(
+        val octahedron = Mesh(
             floatArrayOf(
                 1f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, 1f,
                 0f, 1f, 0f, -1f, 0f, 0f, 0f, 0f, 1f,
