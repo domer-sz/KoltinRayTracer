@@ -12,6 +12,8 @@ import rayTraceTypescript.objects.Sphere
 import rayTraceTypescript.objects.Triangle
 import rayTraceTypescript.textures.CheckerTexture
 import rayTraceTypescript.textures.ImageTexture
+import rayTraceTypescript.textures.NoiseTexture
+import rayTraceTypescript.textures.Perlin
 import rayTraceTypescript.textures.SolidColorTexture
 import rayTraceTypescript.textures.Texture
 import java.io.ByteArrayOutputStream
@@ -37,10 +39,13 @@ class SceneFlattener private constructor() {
     private val textureInts = ArrayList<Int>()
     private val textureFloats = ArrayList<Float>()
     private val images = ByteArrayOutputStream()
+    private val perlinVectors = ArrayList<Float>()
+    private val perlinPermutations = ArrayList<Int>()
 
     private val materialIndices = IdentityHashMap<Material, Int>()
     private val textureIndices = IdentityHashMap<Texture, Int>()
     private val colorTextures = IdentityHashMap<Color, Int>()
+    private val perlinBlocks = IdentityHashMap<Perlin, Int>()
 
     private var maxDepth = 0
 
@@ -65,6 +70,8 @@ class SceneFlattener private constructor() {
             textureInts = textureInts.toIntArray(),
             textureFloats = textureFloats.toFloatArray(),
             textureImages = images.toByteArray(),
+            perlinVectors = perlinVectors.toFloatArray(),
+            perlinPermutations = perlinPermutations.toIntArray(),
             rootNode = root,
             maxDepth = maxDepth
         )
@@ -188,8 +195,26 @@ class SceneFlattener private constructor() {
                 textureEntry(intArrayOf(1, even, odd, 0), floatArrayOf(texture.invertedScale, 0.0f, 0.0f, 0.0f))
             }
             is ImageTexture -> imageTexture(texture)
+            is NoiseTexture -> textureEntry(
+                intArrayOf(4, registerPerlin(texture.perlin), 0, 0),
+                floatArrayOf(texture.scale, 0.0f, 0.0f, 0.0f)
+            )
             else -> throw IllegalArgumentException("Unsupported texture for GPU rendering: ${texture::class.java.name}")
         }
+    }
+
+    /** Copies one Perlin instance's lattice into the shared buffers and returns its block. */
+    private fun registerPerlin(perlin: Perlin): Int = perlinBlocks.getOrPut(perlin) {
+        val block = perlinVectors.size / SceneBuffers.PERLIN_BLOCK
+        perlin.randomVectors.forEach { vector ->
+            perlinVectors.add(vector.x)
+            perlinVectors.add(vector.y)
+            perlinVectors.add(vector.z)
+        }
+        listOf(perlin.permX, perlin.permY, perlin.permZ).forEach { table ->
+            table.forEach { perlinPermutations.add(it) }
+        }
+        block
     }
 
     private fun registerColor(color: Color): Int = colorTextures.getOrPut(color) { solidTexture(color) }

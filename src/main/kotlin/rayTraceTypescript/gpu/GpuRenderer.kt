@@ -63,6 +63,8 @@ class GpuRenderer : Renderer {
                 val textureInts = readOnly(scene.textureInts)
                 val textureFloats = readOnly(scene.textureFloats)
                 val textureImages = createBytes(cl.context, scene.textureImages).also { buffers += it }
+                val perlinVectors = readOnly(scene.perlinVectors)
+                val perlinPermutations = readOnly(scene.perlinPermutations)
 
                 val output = MemoryStack.stackPush().use { stack ->
                     val errcode = stack.mallocInt(1)
@@ -81,7 +83,8 @@ class GpuRenderer : Renderer {
                 for (buffer in listOf(
                     cameraBuffer, nodeBounds, nodeLinks, spheres, sphereMaterials,
                     triangles, triangleMaterials,
-                    materialInts, materialFloats, textureInts, textureFloats, textureImages, output
+                    materialInts, materialFloats, textureInts, textureFloats, textureImages,
+                    perlinVectors, perlinPermutations, output
                 )) {
                     OpenClContext.check(clSetKernelArg1p(kernel, arg++, buffer), "clSetKernelArg($arg)")
                 }

@@ -14,6 +14,7 @@ import rayTraceTypescript.objects.Sphere
 import rayTraceTypescript.randomWorld
 import rayTraceTypescript.textures.CheckerTexture
 import rayTraceTypescript.textures.ImageTexture
+import rayTraceTypescript.textures.NoiseTexture
 
 /**
  * The scenes from the books, each built the way its chapter describes. Pick one with
@@ -24,6 +25,7 @@ object BookScenes {
     private val scenes: Map<String, () -> SceneDefinition> = linkedMapOf(
         "bouncing-spheres" to { bouncingSpheres() },
         "earth" to { earth() },
+        "perlin-spheres" to { perlinSpheres() },
         "model" to { model() }
     )
 
@@ -58,6 +60,31 @@ object BookScenes {
             focusDistance = 10.0f
         }
     )
+
+    /** The Next Week, chapter 5: two spheres sharing one marble texture built from turbulence. */
+    fun perlinSpheres(): SceneDefinition {
+        val marble = NoiseTexture(4.0f)
+        return SceneDefinition(
+            name = "perlin-spheres",
+            world = HittableList(
+                mutableListOf(
+                    Sphere(Point(0f, -1000f, 0f), 1000f, Lambertian(marble)),
+                    Sphere(Point(0f, 2f, 0f), 2f, Lambertian(marble))
+                )
+            ),
+            camera = Camera().apply {
+                aspectRatio = 16.0f / 9.0f
+                imageWidth = 400
+                samplesPerPixel = 100
+                maxReflectionDepth = 50
+                vfov = 20.0f
+                lookFrom = Point(13f, 2f, 3f)
+                lookAt = Point(0f, 0f, 0f)
+                vUp = Vector(0f, 1f, 0f)
+                defocusAngle = 0f
+            }
+        )
+    }
 
     /** The Next Week, chapter 4: an image texture wrapped around a globe. */
     fun earth() = SceneDefinition(

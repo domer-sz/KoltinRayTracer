@@ -218,10 +218,69 @@ inline bool world_hit(__global const float* nodeBounds, __global const int* node
     return hitAnything;
 }
 
+// ---------------------------------------------------------------- noise
+
+#define PERLIN_BLOCK 768
+#define TURBULENCE_DEPTH 7
+
+inline float perlin_noise(__global const float* vectors, __global const int* permutations,
+                          int block, float3 p) {
+    float u = p.x - floor(p.x);
+    float v = p.y - floor(p.y);
+    float w = p.z - floor(p.z);
+
+    int i = (int)floor(p.x);
+    int j = (int)floor(p.y);
+    int k = (int)floor(p.z);
+
+    // Hermite smoothing, so the lattice does not show through as blocks.
+    float uu = u * u * (3.0f - 2.0f * u);
+    float vv = v * v * (3.0f - 2.0f * v);
+    float ww = w * w * (3.0f - 2.0f * w);
+
+    int permBase = block * PERLIN_BLOCK;
+    int vectorBase = block * PERLIN_BLOCK;
+    float accumulated = 0.0f;
+
+    for (int di = 0; di < 2; di++) {
+        for (int dj = 0; dj < 2; dj++) {
+            for (int dk = 0; dk < 2; dk++) {
+                int index = permutations[permBase + ((i + di) & 255)]
+                          ^ permutations[permBase + 256 + ((j + dj) & 255)]
+                          ^ permutations[permBase + 512 + ((k + dk) & 255)];
+                float3 corner = (float3)(vectors[vectorBase + index * 3],
+                                         vectors[vectorBase + index * 3 + 1],
+                                         vectors[vectorBase + index * 3 + 2]);
+                float3 weight = (float3)(u - di, v - dj, w - dk);
+                accumulated += (di * uu + (1 - di) * (1.0f - uu))
+                             * (dj * vv + (1 - dj) * (1.0f - vv))
+                             * (dk * ww + (1 - dk) * (1.0f - ww))
+                             * dot(corner, weight);
+            }
+        }
+    }
+    return accumulated;
+}
+
+inline float perlin_turbulence(__global const float* vectors, __global const int* permutations,
+                               int block, float3 p) {
+    float accumulated = 0.0f;
+    float3 sample = p;
+    float weight = 1.0f;
+    for (int octave = 0; octave < TURBULENCE_DEPTH; octave++) {
+        accumulated += weight * perlin_noise(vectors, permutations, block, sample);
+        weight *= 0.5f;
+        sample *= 2.0f;
+    }
+    return fabs(accumulated);
+}
+
 // ---------------------------------------------------------------- textures
 
 inline float3 texture_value(__global const int* texI, __global const float* texF,
-                            __global const uchar* images, int index, float u, float v, float3 p) {
+                            __global const uchar* images,
+                            __global const float* perlinVectors, __global const int* perlinPermutations,
+                            int index, float u, float v, float3 p) {
     for (int hop = 0; hop < 8; hop++) {
         int type = texI[index * 4];
 
@@ -254,6 +313,13 @@ inline float3 texture_value(__global const int* texI, __global const float* texF
             int at = offset + (j * width + i) * 3;
             return (float3)((float)images[at], (float)images[at + 1], (float)images[at + 2]) * (1.0f / 255.0f);
         }
+        if (type == 4) {                                  // NoiseTexture
+            float scale = texF[index * 4];
+            int block = texI[index * 4 + 1];
+            float value = 0.5f * (1.0f + sin(scale * p.z
+                + 10.0f * perlin_turbulence(perlinVectors, perlinPermutations, block, p)));
+            return (float3)(value, value, value);
+        }
         break;                                            // image that failed to load
     }
     return (float3)(0.0f, 1.0f, 1.0f);
@@ -279,6 +345,7 @@ inline float3 refract_dir(float3 uv, float3 n, float etaiOverEtat) {
 inline bool scatter(__global const int* matI, __global const float* matF,
                     __global const int* texI, __global const float* texF,
                     __global const uchar* images,
+                    __global const float* perlinVectors, __global const int* perlinPermutations,
                     const HitRecord* rec, float3 inDirection, Rng* rng,
                     float3* attenuation, float3* scattered) {
     int type = matI[rec->material * 2];
@@ -287,7 +354,8 @@ inline bool scatter(__global const int* matI, __global const float* matF,
     if (type == 0) {                                      // Lambertian
         float3 direction = random_on_hemisphere(rng, rec->normal);
         if (near_zero(direction)) direction = rec->normal;
-        *attenuation = texture_value(texI, texF, images, texture, rec->u, rec->v, rec->point);
+        *attenuation = texture_value(texI, texF, images, perlinVectors, perlinPermutations,
+                                     texture, rec->u, rec->v, rec->point);
         *scattered = direction;
         return true;
     }
@@ -299,7 +367,8 @@ inline bool scatter(__global const int* matI, __global const float* matF,
         float3 reflected = unitDirection - rec->normal * (2.0f * dot(unitDirection, rec->normal));
         float3 direction = reflected + random_in_unit_sphere(rng) * fuzz;
         if (dot(direction, rec->normal) <= 0.0f) return false;
-        *attenuation = texture_value(texI, texF, images, texture, rec->u, rec->v, rec->point);
+        *attenuation = texture_value(texI, texF, images, perlinVectors, perlinPermutations,
+                                     texture, rec->u, rec->v, rec->point);
         *scattered = direction;
         return true;
     }
@@ -335,6 +404,8 @@ __kernel void render(__global const float* cam,
                      __global const int* texI,
                      __global const float* texF,
                      __global const uchar* images,
+                     __global const float* perlinVectors,
+                     __global const int* perlinPermutations,
                      __global float* out,
                      const int width,
                      const int height,
@@ -389,7 +460,8 @@ __kernel void render(__global const float* cam,
                           rootNode, origin, direction, time, 0.001f, INFINITY, &rec)) {
                 float3 attenuation;
                 float3 scattered;
-                if (!scatter(matI, matF, texI, texF, images, &rec, direction, &rng, &attenuation, &scattered)) {
+                if (!scatter(matI, matF, texI, texF, images, perlinVectors, perlinPermutations,
+                             &rec, direction, &rng, &attenuation, &scattered)) {
                     break;
                 }
                 throughput *= attenuation;

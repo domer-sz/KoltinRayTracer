@@ -12,7 +12,10 @@ package rayTraceTypescript.gpu
  *  - [materialInts]: 2 ints per material - type (0 Lambertian, 1 Metal, 2 Dielectric), texture index
  *  - [materialFloats]: 2 floats per material - fuzz, refraction index
  *  - [textureInts]: 4 ints per texture - type (0 solid, 1 checker, 2 image, 3 missing image) + payload
- *  - [textureFloats]: 4 floats per texture - solid rgb, or the checker's inverted scale
+ *  - [textureFloats]: 4 floats per texture - solid rgb, the checker's inverted scale, or a
+ *    noise texture's scale
+ *  - [perlinVectors] / [perlinPermutations]: one 256-entry lattice per Perlin instance, copied
+ *    from the CPU tables so both renderers sample the same noise field
  */
 class SceneBuffers(
     val nodeBounds: FloatArray,
@@ -26,6 +29,8 @@ class SceneBuffers(
     val textureInts: IntArray,
     val textureFloats: FloatArray,
     val textureImages: ByteArray,
+    val perlinVectors: FloatArray,
+    val perlinPermutations: IntArray,
     val rootNode: Int,
     val maxDepth: Int
 ) {
@@ -42,6 +47,9 @@ class SceneBuffers(
         const val MATERIAL_FLOAT_STRIDE = 2
         const val TEXTURE_INT_STRIDE = 4
         const val TEXTURE_FLOAT_STRIDE = 4
+
+        /** 256 lattice vectors of x/y/z, and three 256-entry permutations, per Perlin instance. */
+        const val PERLIN_BLOCK = 768
 
         /** Marks a node as a leaf; its first link is then an index into that primitive's buffer. */
         const val LEAF_SPHERE = -1

@@ -16,6 +16,7 @@ import rayTraceTypescript.render.CpuRenderer
 import rayTraceTypescript.render.Renderer
 import rayTraceTypescript.textures.CheckerTexture
 import rayTraceTypescript.textures.ImageTexture
+import rayTraceTypescript.textures.NoiseTexture
 import rayTraceTypescript.textures.RtwImage
 import rayTraceTypescript.utils.RandomSource
 import java.awt.image.BufferedImage
@@ -33,6 +34,12 @@ class GpuCpuComparisonTest {
     fun `gpu matches the cpu render for every material`() {
         assumeOpenCl()
         assertLooksTheSame(materialsScene())
+    }
+
+    @Test
+    fun `gpu matches the cpu render for perlin noise`() {
+        assumeOpenCl()
+        assertLooksTheSame(noiseScene())
     }
 
     @Test
@@ -115,6 +122,17 @@ class GpuCpuComparisonTest {
         val metal = Sphere(Point(0.0f, 0.6f, 0.0f), 0.6f, Metal(Color(0.7f, 0.6f, 0.5f), 0.15f))
         val glass = Sphere(Point(1.6f, 0.5f, 0.4f), 0.5f, Dielectric(1.5f))
         return HittableList(mutableListOf(BvhNode(HittableList(mutableListOf(ground, moving, metal, glass)))))
+    }
+
+    /** The marble texture, which the GPU reads from the same lattice the CPU built. */
+    private fun noiseScene(): Hittable {
+        val marble = NoiseTexture(4.0f)
+        return HittableList(
+            mutableListOf(
+                Sphere(Point(0.0f, -1000.0f, 0.0f), 1000.0f, Lambertian(marble)),
+                Sphere(Point(0.0f, 1.0f, 0.0f), 1.0f, Lambertian(marble))
+            )
+        )
     }
 
     /** An octahedron standing on the checkered floor, the default model placement. */

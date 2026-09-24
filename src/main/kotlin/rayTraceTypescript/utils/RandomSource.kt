@@ -22,4 +22,7 @@ object RandomSource {
     fun nextFloat(): Float = rng.nextFloat()
 
     fun nextFloat(min: Float, max: Float): Float = rng.nextFloat() * (max - min) + min
+
+    /** Inclusive on both ends, matching the books' random_int. */
+    fun nextInt(min: Int, max: Int): Int = rng.nextInt(min, max + 1)
 }
