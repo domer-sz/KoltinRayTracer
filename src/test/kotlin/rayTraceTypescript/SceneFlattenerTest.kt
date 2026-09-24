@@ -11,6 +11,7 @@ import rayTraceTypescript.materials.Metal
 import rayTraceTypescript.objects.BvhNode
 import rayTraceTypescript.objects.HittableList
 import rayTraceTypescript.objects.Sphere
+import rayTraceTypescript.objects.Triangle
 
 class SceneFlattenerTest {
 
@@ -45,6 +46,32 @@ class SceneFlattenerTest {
         assertEquals(box.x.max, buffers.nodeBounds[root + 3])
         assertEquals(box.y.max, buffers.nodeBounds[root + 4])
         assertEquals(box.z.max, buffers.nodeBounds[root + 5])
+    }
+
+    @Test
+    fun `flattens triangles as their own leaf kind`() {
+        val material = Lambertian(Color(0.7f, 0.3f, 0.2f))
+        val world = HittableList(
+            mutableListOf(
+                Sphere(Point(0.0f, -1000.0f, 0.0f), 1000.0f, Lambertian(Color(0.5f, 0.5f, 0.5f))),
+                Triangle(Point(0.0f, 0.0f, 0.0f), Point(1.0f, 0.0f, 0.0f), Point(0.0f, 1.0f, 0.0f), material),
+                Triangle(Point(0.0f, 0.0f, 0.0f), Point(0.0f, 1.0f, 0.0f), Point(0.0f, 0.0f, 1.0f), material)
+            )
+        )
+        val buffers = SceneFlattener.flatten(world)
+
+        assertEquals(2, buffers.triangleCount)
+        assertEquals(1, buffers.sphereCount)
+        assertEquals(2, buffers.triangles.size / SceneBuffers.TRIANGLE_STRIDE)
+
+        val leafKinds = (0 until buffers.nodeCount)
+            .map { buffers.nodeLinks[it * SceneBuffers.NODE_LINK_STRIDE + 1] }
+        assertEquals(2, leafKinds.count { it == SceneBuffers.LEAF_TRIANGLE })
+        assertEquals(1, leafKinds.count { it == SceneBuffers.LEAF_SPHERE })
+
+        // First vertex and both edges, exactly as the kernel reads them.
+        assertEquals(1.0f, buffers.triangles[3])   // edge1.x of the first facet
+        assertEquals(1.0f, buffers.triangles[7])   // edge2.y of the first facet
     }
 
     @Test

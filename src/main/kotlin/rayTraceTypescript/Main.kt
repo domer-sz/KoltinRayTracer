@@ -7,6 +7,8 @@ import rayTraceTypescript.objects.BvhNode
 import rayTraceTypescript.objects.Hittable
 import rayTraceTypescript.objects.HittableList
 import rayTraceTypescript.objects.Sphere
+import rayTraceTypescript.objects.StlMesh
+import rayTraceTypescript.materials.Material
 import rayTraceTypescript.textures.CheckerTexture
 import rayTraceTypescript.textures.ImageTexture
 import rayTraceTypescript.utils.randomFloat
@@ -14,10 +16,60 @@ import kotlin.system.measureTimeMillis
 import kotlin.time.Duration
 
 fun main() {
-    when(2) {
+    // Scene picker: -Drt.scene=1 spheres, 2 earth (default), 3 an STL model on the floor.
+    when (System.getProperty("rt.scene", "2").toIntOrNull() ?: 2) {
         1 -> spheresWorld()
-        2 -> earth()
+        3 -> stlModel()
+        else -> earth()
     }
+}
+
+/**
+ * Renders an STL model standing on the same checkered floor the sphere scene uses.
+ * The file comes from -Drt.stl=<path>, the STL_FILE environment variable, or ./model.stl.
+ */
+private fun stlModel() {
+    val path = System.getProperty("rt.stl") ?: System.getenv("STL_FILE") ?: "model.stl"
+    val world = stlWorld(path)
+
+    val camera = Camera()
+    camera.aspectRatio = 16.0f / 9.0f
+    camera.imageWidth = 800
+    camera.samplesPerPixel = 150
+    camera.maxReflectionDepth = 20
+
+    camera.vfov = 24.0f
+    camera.lookFrom = Point(3.2f, 2.2f, 6.0f)
+    camera.lookAt = Point(0.0f, 0.9f, 0.0f)
+    camera.vUp = Vector(0.0f, 1.0f, 0.0f)
+
+    camera.defocusAngle = 0.2f
+    camera.focusDistance = 6.8f
+
+    var numberOfRays: Long = 0
+    val time = measureTimeMillis {
+        numberOfRays = camera.render(world)
+    }
+    printRenderReport(time, numberOfRays)
+}
+
+/**
+ * The default STL setup: the checkered ground of [randomWorld], with the model scaled to a
+ * usable size and resting on it. Every facet goes through a BVH, otherwise a mesh of any size
+ * would be traversed one triangle at a time.
+ */
+fun stlWorld(
+    path: String,
+    material: Material = Lambertian(Color(0.72f, 0.38f, 0.22f))
+): HittableList {
+    val checker = CheckerTexture(.32F, Color(.2, .3, .1), Color(.9, .9, .9))
+    val objects: MutableList<Hittable> = mutableListOf(
+        Sphere(Point(0.0f, -1000.0f, 0.0f), 1000.0F, Lambertian(checker))
+    )
+    val mesh = StlMesh.load(path).standingOnFloor()
+    println("Loaded ${mesh.triangleCount} triangles from $path")
+    objects.addAll(mesh.toHittables(material))
+    return HittableList(mutableListOf(BvhNode(HittableList(objects))))
 }
 
 private fun spheresWorld() {

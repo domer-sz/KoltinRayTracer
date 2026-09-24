@@ -11,6 +11,7 @@ import rayTraceTypescript.objects.BvhNode
 import rayTraceTypescript.objects.Hittable
 import rayTraceTypescript.objects.HittableList
 import rayTraceTypescript.objects.Sphere
+import rayTraceTypescript.objects.StlMesh
 import rayTraceTypescript.render.CpuRenderer
 import rayTraceTypescript.render.Renderer
 import rayTraceTypescript.textures.CheckerTexture
@@ -32,6 +33,12 @@ class GpuCpuComparisonTest {
     fun `gpu matches the cpu render for every material`() {
         assumeOpenCl()
         assertLooksTheSame(materialsScene())
+    }
+
+    @Test
+    fun `gpu matches the cpu render for an stl mesh`() {
+        assumeOpenCl()
+        assertLooksTheSame(meshScene())
     }
 
     @Test
@@ -108,6 +115,29 @@ class GpuCpuComparisonTest {
         val metal = Sphere(Point(0.0f, 0.6f, 0.0f), 0.6f, Metal(Color(0.7f, 0.6f, 0.5f), 0.15f))
         val glass = Sphere(Point(1.6f, 0.5f, 0.4f), 0.5f, Dielectric(1.5f))
         return HittableList(mutableListOf(BvhNode(HittableList(mutableListOf(ground, moving, metal, glass)))))
+    }
+
+    /** An octahedron standing on the checkered floor, the default STL placement. */
+    private fun meshScene(): Hittable {
+        val ground = Sphere(
+            Point(0.0f, -1000.0f, 0.0f),
+            1000.0f,
+            Lambertian(CheckerTexture(0.32f, Color(0.2f, 0.3f, 0.1f), Color(0.9f, 0.9f, 0.9f)))
+        )
+        val octahedron = StlMesh(
+            floatArrayOf(
+                1f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, 1f,
+                0f, 1f, 0f, -1f, 0f, 0f, 0f, 0f, 1f,
+                -1f, 0f, 0f, 0f, -1f, 0f, 0f, 0f, 1f,
+                0f, -1f, 0f, 1f, 0f, 0f, 0f, 0f, 1f,
+                0f, 1f, 0f, 1f, 0f, 0f, 0f, 0f, -1f,
+                -1f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, -1f,
+                0f, -1f, 0f, -1f, 0f, 0f, 0f, 0f, -1f,
+                1f, 0f, 0f, 0f, -1f, 0f, 0f, 0f, -1f
+            )
+        ).standingOnFloor()
+        val facets = octahedron.toHittables(Lambertian(Color(0.72f, 0.38f, 0.22f)))
+        return HittableList(mutableListOf(BvhNode(HittableList((listOf(ground) + facets).toMutableList()))))
     }
 
     private fun imageTextureScene(): Hittable {

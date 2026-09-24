@@ -9,6 +9,7 @@ import rayTraceTypescript.objects.BvhNode
 import rayTraceTypescript.objects.Hittable
 import rayTraceTypescript.objects.HittableList
 import rayTraceTypescript.objects.Sphere
+import rayTraceTypescript.objects.Triangle
 import rayTraceTypescript.textures.CheckerTexture
 import rayTraceTypescript.textures.ImageTexture
 import rayTraceTypescript.textures.SolidColorTexture
@@ -29,6 +30,8 @@ class SceneFlattener private constructor() {
     private val nodeLinks = ArrayList<Int>()
     private val spheres = ArrayList<Float>()
     private val sphereMaterials = ArrayList<Int>()
+    private val triangles = ArrayList<Float>()
+    private val triangleMaterials = ArrayList<Int>()
     private val materialInts = ArrayList<Int>()
     private val materialFloats = ArrayList<Float>()
     private val textureInts = ArrayList<Int>()
@@ -55,6 +58,8 @@ class SceneFlattener private constructor() {
             nodeLinks = nodeLinks.toIntArray(),
             spheres = spheres.toFloatArray(),
             sphereMaterials = sphereMaterials.toIntArray(),
+            triangles = triangles.toFloatArray(),
+            triangleMaterials = triangleMaterials.toIntArray(),
             materialInts = materialInts.toIntArray(),
             materialFloats = materialFloats.toFloatArray(),
             textureInts = textureInts.toIntArray(),
@@ -68,7 +73,8 @@ class SceneFlattener private constructor() {
     private fun emit(hittable: Hittable, depth: Int): Int {
         if (depth > maxDepth) maxDepth = depth
         return when (hittable) {
-            is Sphere -> emitLeaf(hittable)
+            is Sphere -> emitSphere(hittable)
+            is Triangle -> emitTriangle(hittable)
             is BvhNode ->
                 // A one-object BVH node stores the same child twice; testing it once is enough.
                 if (hittable.left === hittable.right) emit(hittable.left, depth)
@@ -87,7 +93,25 @@ class SceneFlattener private constructor() {
         return emitInner(emitRange(objects, start, mid, depth + 1), emitRange(objects, mid, end, depth + 1))
     }
 
-    private fun emitLeaf(sphere: Sphere): Int {
+    private fun emitTriangle(triangle: Triangle): Int {
+        val index = triangleMaterials.size
+        for (component in listOf(triangle.v0, triangle.edge1, triangle.edge2)) {
+            triangles.add(component.x)
+            triangles.add(component.y)
+            triangles.add(component.z)
+        }
+        repeat(3) { triangles.add(0.0f) }
+        triangleMaterials.add(registerMaterial(triangle.material))
+
+        val box = triangle.aabbBoundingBox()
+        return emitNode(
+            floatArrayOf(box.x.min, box.y.min, box.z.min, box.x.max, box.y.max, box.z.max),
+            index,
+            SceneBuffers.LEAF_TRIANGLE
+        )
+    }
+
+    private fun emitSphere(sphere: Sphere): Int {
         val sphereIndex = sphereMaterials.size
         val center = sphere.center
         spheres.add(center.origin.x)
@@ -104,7 +128,7 @@ class SceneFlattener private constructor() {
         return emitNode(
             floatArrayOf(box.x.min, box.y.min, box.z.min, box.x.max, box.y.max, box.z.max),
             sphereIndex,
-            SceneBuffers.LEAF
+            SceneBuffers.LEAF_SPHERE
         )
     }
 

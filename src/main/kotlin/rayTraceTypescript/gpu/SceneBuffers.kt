@@ -5,8 +5,10 @@ package rayTraceTypescript.gpu
  *
  * Layout (see raytracer.cl, which mirrors these strides):
  *  - [nodeBounds]: 6 floats per node - min xyz, max xyz
- *  - [nodeLinks]: 2 ints per node - inner node: child node indices; leaf: (sphere index, [LEAF])
+ *  - [nodeLinks]: 2 ints per node - inner node: child node indices; leaf: the primitive index
+ *    plus [LEAF_SPHERE] or [LEAF_TRIANGLE]
  *  - [spheres]: 8 floats per sphere - center at t=0 (3), center movement (3), radius, unused
+ *  - [triangles]: 12 floats per facet - first vertex (3), two edges (3 + 3), unused (3)
  *  - [materialInts]: 2 ints per material - type (0 Lambertian, 1 Metal, 2 Dielectric), texture index
  *  - [materialFloats]: 2 floats per material - fuzz, refraction index
  *  - [textureInts]: 4 ints per texture - type (0 solid, 1 checker, 2 image, 3 missing image) + payload
@@ -17,6 +19,8 @@ class SceneBuffers(
     val nodeLinks: IntArray,
     val spheres: FloatArray,
     val sphereMaterials: IntArray,
+    val triangles: FloatArray,
+    val triangleMaterials: IntArray,
     val materialInts: IntArray,
     val materialFloats: FloatArray,
     val textureInts: IntArray,
@@ -27,18 +31,21 @@ class SceneBuffers(
 ) {
     val nodeCount: Int get() = nodeLinks.size / NODE_LINK_STRIDE
     val sphereCount: Int get() = sphereMaterials.size
+    val triangleCount: Int get() = triangleMaterials.size
 
     companion object {
         const val NODE_BOUNDS_STRIDE = 6
         const val NODE_LINK_STRIDE = 2
         const val SPHERE_STRIDE = 8
+        const val TRIANGLE_STRIDE = 12
         const val MATERIAL_INT_STRIDE = 2
         const val MATERIAL_FLOAT_STRIDE = 2
         const val TEXTURE_INT_STRIDE = 4
         const val TEXTURE_FLOAT_STRIDE = 4
 
-        /** Marks a node as a leaf; its first link is then a sphere index. */
-        const val LEAF = -1
+        /** Marks a node as a leaf; its first link is then an index into that primitive's buffer. */
+        const val LEAF_SPHERE = -1
+        const val LEAF_TRIANGLE = -2
 
         /** Depth of the traversal stack reserved in the kernel. */
         const val MAX_TRAVERSAL_DEPTH = 64

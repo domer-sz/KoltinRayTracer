@@ -2,7 +2,9 @@
 // texture classes. The recursion of rayColor becomes a throughput loop, and every random
 // draw keeps the order and the distribution the CPU uses so the noise looks the same.
 
-#define LEAF          (-1)
+#define LEAF_SPHERE   (-1)
+#define LEAF_TRIANGLE (-2)
+#define TRIANGLE_PARALLEL_EPSILON 1e-8f
 #define STACK_SIZE    64
 #define REJECTION_CAP 64
 
@@ -139,10 +141,49 @@ inline bool sphere_hit(__global const float* spheres, __global const int* sphere
     return true;
 }
 
+// Triangle.hit: Moller-Trumbore, with the barycentric coordinates reported as u/v.
+inline bool triangle_hit(__global const float* triangles, __global const int* triangleMaterials, int index,
+                         float3 origin, float3 direction, float tMin, float tMax,
+                         HitRecord* rec) {
+    __global const float* t = triangles + index * 12;
+    float3 v0 = (float3)(t[0], t[1], t[2]);
+    float3 edge1 = (float3)(t[3], t[4], t[5]);
+    float3 edge2 = (float3)(t[6], t[7], t[8]);
+
+    float3 pvec = cross(direction, edge2);
+    float determinant = dot(edge1, pvec);
+    if (fabs(determinant) < TRIANGLE_PARALLEL_EPSILON) return false;
+
+    float inverseDeterminant = 1.0f / determinant;
+    float3 tvec = origin - v0;
+    float u = dot(tvec, pvec) * inverseDeterminant;
+    if (u < 0.0f || u > 1.0f) return false;
+
+    float3 qvec = cross(tvec, edge1);
+    float v = dot(direction, qvec) * inverseDeterminant;
+    if (v < 0.0f || u + v > 1.0f) return false;
+
+    float root = dot(edge2, qvec) * inverseDeterminant;
+    if (!(root > tMin && root < tMax)) return false;
+
+    float3 outwardNormal = cross(edge1, edge2);
+    outwardNormal = outwardNormal / length(outwardNormal);
+
+    rec->point = origin + root * direction;
+    rec->t = root;
+    rec->u = u;
+    rec->v = v;
+    rec->material = triangleMaterials[index];
+    rec->frontFace = dot(direction, outwardNormal) < 0.0f;
+    rec->normal = rec->frontFace ? outwardNormal : -outwardNormal;
+    return true;
+}
+
 // Closest hit over the flattened tree; equivalent to BvhNode.hit narrowing the interval
 // as it descends.
 inline bool world_hit(__global const float* nodeBounds, __global const int* nodeLinks,
                       __global const float* spheres, __global const int* sphereMaterials,
+                      __global const float* triangles, __global const int* triangleMaterials,
                       int rootNode, float3 origin, float3 direction, float time,
                       float tMin, float tMax, HitRecord* rec) {
     int stack[STACK_SIZE];
@@ -159,9 +200,12 @@ inline bool world_hit(__global const float* nodeBounds, __global const int* node
         int first = nodeLinks[node * 2];
         int second = nodeLinks[node * 2 + 1];
 
-        if (second == LEAF) {
+        if (second == LEAF_SPHERE || second == LEAF_TRIANGLE) {
             HitRecord candidate;
-            if (sphere_hit(spheres, sphereMaterials, first, origin, direction, time, tMin, closest, &candidate)) {
+            bool hit = second == LEAF_SPHERE
+                ? sphere_hit(spheres, sphereMaterials, first, origin, direction, time, tMin, closest, &candidate)
+                : triangle_hit(triangles, triangleMaterials, first, origin, direction, tMin, closest, &candidate);
+            if (hit) {
                 hitAnything = true;
                 closest = candidate.t;
                 *rec = candidate;
@@ -284,6 +328,8 @@ __kernel void render(__global const float* cam,
                      __global const int* nodeLinks,
                      __global const float* spheres,
                      __global const int* sphereMaterials,
+                     __global const float* triangles,
+                     __global const int* triangleMaterials,
                      __global const int* matI,
                      __global const float* matF,
                      __global const int* texI,
@@ -339,8 +385,8 @@ __kernel void render(__global const float* cam,
 
         for (int depth = 0; depth < maxReflectionDepth; depth++) {
             HitRecord rec;
-            if (world_hit(nodeBounds, nodeLinks, spheres, sphereMaterials, rootNode,
-                          origin, direction, time, 0.001f, INFINITY, &rec)) {
+            if (world_hit(nodeBounds, nodeLinks, spheres, sphereMaterials, triangles, triangleMaterials,
+                          rootNode, origin, direction, time, 0.001f, INFINITY, &rec)) {
                 float3 attenuation;
                 float3 scattered;
                 if (!scatter(matI, matF, texI, texF, images, &rec, direction, &rng, &attenuation, &scattered)) {

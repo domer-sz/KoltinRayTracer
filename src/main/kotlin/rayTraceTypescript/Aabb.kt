@@ -13,6 +13,8 @@ data class Aabb(
     )
 
     companion object {
+        private const val MIN_THICKNESS = 1e-4f
+
         fun fromPoints(a: Point, b: Point): Aabb {
             val ix = if (a[0] <= b[0]) Interval(a[0], b[0]) else Interval(b[0], a[0])
             val iy = if (a[1] <= b[1]) Interval(a[1], b[1]) else Interval(b[1], a[1])
@@ -20,6 +22,16 @@ data class Aabb(
             return Aabb(ix, iy, iz)
         }
     }
+
+    /**
+     * Widens any axis thinner than [minimum]. A triangle lying in an axis-aligned plane has a
+     * zero-thickness box, and the slab test in [hit] would then reject every ray.
+     */
+    fun padded(minimum: Float = MIN_THICKNESS): Aabb = Aabb(
+        x = if (x.size() >= minimum) x else x.expand(minimum),
+        y = if (y.size() >= minimum) y else y.expand(minimum),
+        z = if (z.size() >= minimum) z else z.expand(minimum)
+    )
 
     fun axisInterval(axis: Int): Interval = when (axis) {
         1 -> y

@@ -56,6 +56,8 @@ class GpuRenderer : Renderer {
                 val nodeLinks = readOnly(scene.nodeLinks)
                 val spheres = readOnly(scene.spheres)
                 val sphereMaterials = readOnly(scene.sphereMaterials)
+                val triangles = readOnly(scene.triangles)
+                val triangleMaterials = readOnly(scene.triangleMaterials)
                 val materialInts = readOnly(scene.materialInts)
                 val materialFloats = readOnly(scene.materialFloats)
                 val textureInts = readOnly(scene.textureInts)
@@ -78,6 +80,7 @@ class GpuRenderer : Renderer {
                 var arg = 0
                 for (buffer in listOf(
                     cameraBuffer, nodeBounds, nodeLinks, spheres, sphereMaterials,
+                    triangles, triangleMaterials,
                     materialInts, materialFloats, textureInts, textureFloats, textureImages, output
                 )) {
                     OpenClContext.check(clSetKernelArg1p(kernel, arg++, buffer), "clSetKernelArg($arg)")
