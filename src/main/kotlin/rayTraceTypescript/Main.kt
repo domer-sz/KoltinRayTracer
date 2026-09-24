@@ -10,93 +10,17 @@ import rayTraceTypescript.objects.Sphere
 import rayTraceTypescript.objects.MeshLoader
 import rayTraceTypescript.materials.Material
 import rayTraceTypescript.textures.CheckerTexture
-import rayTraceTypescript.textures.ImageTexture
 import rayTraceTypescript.utils.randomFloat
 import kotlin.system.measureTimeMillis
-import kotlin.time.Duration
+import rayTraceTypescript.scenes.BookScenes
 
 fun main() {
-    // Scene picker: -Drt.scene=1 spheres, 2 earth (default), 3 a 3D model on the floor.
-    when (System.getProperty("rt.scene", "2").toIntOrNull() ?: 2) {
-        1 -> spheresWorld()
-        3 -> modelScene()
-        else -> earth()
-    }
-}
-
-/**
- * Renders a 3D model standing on the same checkered floor the sphere scene uses.
- * The file comes from -Drt.model=<path>, the MODEL_FILE environment variable, or ./model.stl;
- * any format [MeshLoader] supports will do.
- */
-private fun modelScene() {
-    val path = System.getProperty("rt.model")
-        ?: System.getProperty("rt.stl")
-        ?: System.getenv("MODEL_FILE")
-        ?: System.getenv("STL_FILE")
-        ?: "model.stl"
-    val world = modelWorld(path)
-
-    val camera = Camera()
-    camera.aspectRatio = 16.0f / 9.0f
-    camera.imageWidth = 800
-    camera.samplesPerPixel = 150
-    camera.maxReflectionDepth = 20
-
-    camera.vfov = 24.0f
-    camera.lookFrom = Point(3.2f, 2.2f, 6.0f)
-    camera.lookAt = Point(0.0f, 0.9f, 0.0f)
-    camera.vUp = Vector(0.0f, 1.0f, 0.0f)
-
-    camera.defocusAngle = 0.2f
-    camera.focusDistance = 6.8f
+    val scene = BookScenes.byName(System.getProperty("rt.scene", "earth"))
+    println("Scene: ${scene.name}")
 
     var numberOfRays: Long = 0
     val time = measureTimeMillis {
-        numberOfRays = camera.render(world)
-    }
-    printRenderReport(time, numberOfRays)
-}
-
-/**
- * The default model setup: the checkered ground of [randomWorld], with the mesh scaled to a
- * usable size and resting on it. Every facet goes through a BVH, otherwise a mesh of any size
- * would be traversed one triangle at a time.
- */
-fun modelWorld(
-    path: String,
-    material: Material = Lambertian(Color(0.72f, 0.38f, 0.22f))
-): HittableList {
-    val checker = CheckerTexture(.32F, Color(.2, .3, .1), Color(.9, .9, .9))
-    val objects: MutableList<Hittable> = mutableListOf(
-        Sphere(Point(0.0f, -1000.0f, 0.0f), 1000.0F, Lambertian(checker))
-    )
-    val mesh = MeshLoader.load(path).standingOnFloor()
-    println("Loaded ${mesh.triangleCount} triangles from $path")
-    objects.addAll(mesh.toHittables(material))
-    return HittableList(mutableListOf(BvhNode(HittableList(objects))))
-}
-
-private fun spheresWorld() {
-    val bvhWorld = HittableList(mutableListOf(BvhNode(randomWorld())))
-    val camera = Camera()
-
-    camera.aspectRatio = 16.0f / 9.0f
-    camera.imageWidth = 500
-    camera.maxReflectionDepth = 20
-    camera.samplesPerPixel = 90
-
-    camera.vfov = 20.0f
-    camera.lookFrom = Point(13.0f, 2.0f, 3.0f)
-    camera.lookAt = Point(0.0f, 0.0f, 0.0f)
-    camera.vUp = Vector(0.0f, 1.0f, 0.0f)
-
-    camera.defocusAngle = 0.6f
-    camera.focusDistance = 10.0f
-
-    var numberOfRays: Long = 0
-    val time = measureTimeMillis {
-        numberOfRays = camera.render(bvhWorld)
+        numberOfRays = scene.camera.render(scene.world)
     }
     printRenderReport(time, numberOfRays)
 }
@@ -170,24 +94,3 @@ fun Long.toHumanReadable(): String {
     }
 }
 
-fun earth() {
-        val earthTexture = ImageTexture("earthmap.jpg");
-        val earthSurface = Lambertian(earthTexture);
-        val globe = Sphere(Point(0f,0f,0f), 2f, earthSurface);
-
-        val cam = Camera()
-
-        cam.aspectRatio      = 16.0f / 9.0f
-        cam.imageWidth       = 400
-        cam.samplesPerPixel = 100
-        cam.maxReflectionDepth         = 50
-
-        cam.vfov     = 20f
-        cam.lookFrom = Point(0f,0f,12f)
-        cam.lookAt   = Point(0f,0f,0f)
-        cam.vUp      = Vector(0f,1f,0f)
-
-        cam.defocusAngle = 0f
-
-        cam.render(HittableList(mutableListOf(globe)));
-    }
