@@ -1,0 +1,86 @@
+# Dokończenie księgi 2 i 3 "Ray Tracing in One Weekend" na branchu `books-completed`
+
+## Context
+
+Projekt ma dziś zamkniętą księgę 1 oraz trzy rozdziały księgi 2 (motion blur, BVH, tekstury),
+do tego własne rozszerzenia: renderer GPU (OpenCL) z parytetem wobec CPU, wczytywanie siatek
+z 7 formatów plików 3D. Brakuje reszty księgi 2 (Perlin, quady, światła, instancje, volumes,
+scena finałowa) i całej księgi 3 (importance sampling). Cel: przejść wszystkie pozostałe kroki
+obu ksiąg, na nowym branchu `books-completed` odbitym od `claude-code`, z zachowaniem parytetu
+CPU↔GPU — łącznie z importance samplingiem, żeby Cornell box liczył się sekundy zamiast minut.
+
+Ustalenia z rozmowy: wszystko na obu backendach; rozdziały 2–4 księgi 3 (konsolowe programy
+Monte Carlo) pomijam i wchodzę od razu w PDF-y; obrazki: scena finałowa księgi 2, Cornell box
+księgi 3 (przed i po importance samplingu) oraz jeden obrazek przeglądowy z nowymi prymitywami.
+
+> `raytracing.github.io` jest zablokowany przez politykę sieciową środowiska, więc implementuję
+> z własnej znajomości obu ksiąg, a nie z otwartego tekstu. Jeśli wolisz, żebym szedł dosłownie
+> po treści, dopuść ten host w ustawieniach Network access środowiska.
+
+## Zasada przewodnia
+
+Każdy rozdział to osobny commit: kod CPU wierny książce → port do kernela → testy → `mvn test`.
+Ścieżka CPU zostaje referencją (klasy dokładnie jak w książce), a GPU dostaje spłaszczony
+odpowiednik. Każda nowość dostaje test porównawczy CPU↔GPU w `GpuCpuComparisonTest` (próg to
+zmierzona podłoga szumu, jak dziś).
+
+## Księga 2 — pozostałe rozdziały
+
+| Rozdział | CPU | GPU |
+|---|---|---|
+| 5. Perlin Noise | `textures/Perlin.kt` (permutacje, wektory losowe, interpolacja Hermite'a, `turbulence`), `NoiseTexture` | tablice Perlina generowane raz na CPU i wysyłane jako bufory ⇒ ten sam szum po obu stronach; nowy typ tekstury w kernelu |
+| 6. Quadrilaterals | `objects/Quad.kt` (Q, u, v, normalna, D, w; `isInterior`), bbox z przekątnych przez `Aabb.padded()` | nowy rodzaj liścia `LEAF_QUAD` + `quad_hit` |
+| 7. Lights | `emitted(u,v,point)` w `Material` (domyślnie czarne), `materials/DiffuseLight.kt`, tło jako pole `Camera.background` (null = dzisiejszy gradient nieba, więc obecne sceny renderują się bez zmian) | typ materiału emisyjnego; pętla ścieżki dodaje `throughput * emitted` i kończy promień |
+| 8. Instances | `objects/Translate.kt`, `objects/RotateY.kt` (transformacja promienia i bboxa), helper `box()` z 6 quadów | transformacje wypiekane w geometrię podczas spłaszczania (obrót sfery = obrót środka, quada = rogów), więc kernel pozostaje bez pojęcia instancji |
+| 9. Volumes | `objects/ConstantMedium.kt` + `materials/Isotropic.kt` | liść `LEAF_MEDIUM` z indeksem korzenia bryły granicznej; `medium_hit` robi zagnieżdżony traversal po tym poddrzewie (własny stos — w OpenCL nie ma rekursji) |
+| 10. Final scene | `scenes/BookScenes.kt`: pudełka podłoża, ruchoma sfera, szkło, metal, sfera z mgłą w środku, ziemia, Perlin, sześcian ~1000 sfer obrócony i przesunięty, quad-światło | bez zmian — składa się z gotowych cegiełek |
+
+## Księga 3 — importance sampling
+
+- **ONB i PDF-y**: `utils/Onb.kt`, `pdf/Pdf.kt` z `SpherePdf`, `CosinePdf`, `HittablePdf`,
+  `MixturePdf`, oraz `randomCosineDirection()` dopisane do `Vector`.
+- **Nowy kontrakt materiału**: `ScatteredResult` ustępuje `ScatterRecord(attenuation, pdf,
+  skipPdfRay)`; dochodzi `scatteringPdf(rayIn, hit, scattered)`. Lambertian próbkuje cosinusowo,
+  Metal i Dielectric ustawiają `skipPdfRay` (ścieżka specular omija PDF), Isotropic używa
+  `SpherePdf`. To zmienia rozkład próbek w scenach już istniejących: obraz zbiega do tego samego
+  wyniku, ale mniejszym szumem.
+- **Sampling świateł**: `pdfValue(origin, direction)` i `random(origin)` w `Hittable` —
+  implementacje w `Quad`, `Sphere` i `HittableList`; kamera dostaje listę świateł i miesza
+  gęstości pół na pół (`MixturePdf`), z obsługą zerowego PDF-u i przypadku „brak świateł”
+  (wtedy sam `CosinePdf` — ten sam estymator, większy szum).
+- **GPU**: bufor świateł (rodzaj prymitywu + indeks), `quad_pdf`/`sphere_pdf` i losowanie punktu
+  na świetle w kernelu, mieszanie gęstości i dzielenie przez PDF dokładnie jak na CPU.
+- **Scena finałowa**: Cornell box z księgi 3 (jednostronne światło, szklana kula), renderowany
+  w dwóch wariantach dla porównania szumu.
+
+## Sceny i uruchamianie
+
+`Main.kt` rozrasta się ponad `when(1|2|3)`, więc sceny trafiają do `scenes/BookScenes.kt` jako
+rejestr nazwa → `SceneDefinition(world, camera, lights, background)`. `-Drt.scene` przyjmuje
+nazwy (`cornell-box`, `final-week`, `perlin`, `quads`, `cornell-smoke`, …), a dotychczasowe
+`1|2|3` nadal działają, żeby nie psuć obecnych poleceń z AGENTS.md.
+
+## Weryfikacja
+
+- `mvn test` po każdym rozdziale; nowe testy jednostkowe: trafienia i UV quada, determinizm
+  i zakres Perlina, bbox oraz trafienia instancji, `ConstantMedium` przy ustalonym ziarnie,
+  ONB, oraz całkowanie Monte Carlo każdego PDF-u po sferze (wynik ≈ 1) i zgodność
+  `pdfValue` z empirycznym rozkładem `random()`.
+- `GpuCpuComparisonTest` rozszerzony o scenę z quadami, światłem, Perlinem i mgłą oraz
+  o Cornell box — każda porównywana z podłogą szumu CPU↔CPU.
+- Rendery na GPU: scena finałowa księgi 2, Cornell box księgi 3 (bez i z importance samplingiem,
+  ta sama liczba próbek — różnica w szumie jest tu puentą księgi) i obrazek przeglądowy.
+- `ImageRegressionTest`: golden image na tym branchu jest przestarzały (nie przechodzi od
+  początku sesji, `14.916277`), a zmiana próbkowania z księgi 3 zmienia obraz referencyjny
+  z definicji — po zamknięciu księgi 3 zregeneruję referencję (`UPDATE_REFERENCE_IMAGE=1`)
+  i zaznaczę to w commicie, żeby test znowu coś pilnował.
+
+## Ryzyka
+
+- **Volumes na GPU**: zagnieżdżony traversal to jedyne miejsce, gdzie kernel robi coś, czego
+  nie ma w strukturze płaskiego drzewa. Jeśli okaże się nie do utrzymania w rozsądnej formie,
+  sceny z mgłą wymuszą `CpuRenderer` (mechanizm fallbacku już istnieje) i powiem o tym wprost.
+- **Zmiana kontraktu materiału** dotyka wszystkich materiałów i obu backendów naraz — dlatego
+  idzie osobnym commitem, po zamknięciu całej księgi 2.
+- Rendery finałowe na PoCL (kontener nie ma GPU) liczą się minutami przy 1000 spp; użyję
+  niższych, jawnie podanych ustawień próbkowania i napiszę, jakie.
