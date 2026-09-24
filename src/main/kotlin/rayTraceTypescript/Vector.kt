@@ -73,6 +73,10 @@ open class Vector(val x: Float, val y: Float, val z: Float) {
             }
         }
 
+        /** A direction drawn evenly from the sphere of directions. */
+        @JvmStatic
+        fun randomUnitVector(): Vector = randomInUnitSphere().unit()
+
         @JvmStatic
         fun randomOnHemisphere(normal: Vector): Vector {
             val onUnitSphere = randomInUnitSphere().unit()

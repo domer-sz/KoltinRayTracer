@@ -11,6 +11,7 @@ import rayTraceTypescript.materials.Metal
 import rayTraceTypescript.objects.BvhNode
 import rayTraceTypescript.objects.Hittable
 import rayTraceTypescript.objects.HittableList
+import rayTraceTypescript.objects.ConstantMedium
 import rayTraceTypescript.objects.Quad
 import rayTraceTypescript.objects.RotateY
 import rayTraceTypescript.objects.Translate
@@ -39,6 +40,12 @@ class GpuCpuComparisonTest {
     fun `gpu matches the cpu render for every material`() {
         assumeOpenCl()
         assertLooksTheSame(materialsScene())
+    }
+
+    @Test
+    fun `gpu matches the cpu render for a volume`() {
+        assumeOpenCl()
+        assertLooksTheSame(fogScene(), lit = true)
     }
 
     @Test
@@ -146,6 +153,22 @@ class GpuCpuComparisonTest {
         val glass = Sphere(Point(1.6f, 0.5f, 0.4f), 0.5f, Dielectric(1.5f))
         return HittableList(mutableListOf(BvhNode(HittableList(mutableListOf(ground, moving, metal, glass)))))
     }
+
+    /** A block of fog, which the kernel resolves with a nested traversal of its boundary. */
+    private fun fogScene(): Hittable = HittableList(
+        mutableListOf(
+            Sphere(Point(0.0f, -1000.0f, 0.0f), 1000.0f, Lambertian(Color(0.6f, 0.6f, 0.62f))),
+            ConstantMedium(
+                box(Point(-0.8f, 0.0f, -0.8f), Point(0.8f, 1.6f, 0.8f), Lambertian(Color(1f, 1f, 1f))),
+                1.2f,
+                Color(0.9f, 0.9f, 0.9f)
+            ),
+            Quad(
+                Point(-1.5f, 3.0f, -1.5f), Vector(3.0f, 0.0f, 0.0f), Vector(0.0f, 0.0f, 3.0f),
+                DiffuseLight(Color(6.0f, 6.0f, 6.0f))
+            )
+        )
+    )
 
     /**
      * A block spun and moved by the instance wrappers. The CPU transforms rays at traversal

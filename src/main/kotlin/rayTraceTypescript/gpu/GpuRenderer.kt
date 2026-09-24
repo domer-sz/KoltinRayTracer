@@ -60,6 +60,8 @@ class GpuRenderer : Renderer {
                 val triangleMaterials = readOnly(scene.triangleMaterials)
                 val quads = readOnly(scene.quads)
                 val quadMaterials = readOnly(scene.quadMaterials)
+                val mediumInts = readOnly(scene.mediumInts)
+                val mediumFloats = readOnly(scene.mediumFloats)
                 val materialInts = readOnly(scene.materialInts)
                 val materialFloats = readOnly(scene.materialFloats)
                 val textureInts = readOnly(scene.textureInts)
@@ -84,7 +86,7 @@ class GpuRenderer : Renderer {
                 var arg = 0
                 for (buffer in listOf(
                     cameraBuffer, nodeBounds, nodeLinks, spheres, sphereMaterials,
-                    triangles, triangleMaterials, quads, quadMaterials,
+                    triangles, triangleMaterials, quads, quadMaterials, mediumInts, mediumFloats,
                     materialInts, materialFloats, textureInts, textureFloats, textureImages,
                     perlinVectors, perlinPermutations, output
                 )) {

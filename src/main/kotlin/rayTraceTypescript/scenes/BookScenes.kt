@@ -11,6 +11,7 @@ import rayTraceTypescript.objects.BvhNode
 import rayTraceTypescript.objects.HittableList
 import rayTraceTypescript.objects.Hittable
 import rayTraceTypescript.objects.MeshLoader
+import rayTraceTypescript.objects.ConstantMedium
 import rayTraceTypescript.objects.Quad
 import rayTraceTypescript.objects.RotateY
 import rayTraceTypescript.objects.Translate
@@ -35,6 +36,7 @@ object BookScenes {
         "simple-light" to { simpleLight() },
         "cornell-box" to { cornellBox() },
         "cornell-blocks" to { cornellBlocks() },
+        "cornell-smoke" to { cornellSmoke() },
         "model" to { model() }
     )
 
@@ -210,6 +212,41 @@ object BookScenes {
         return SceneDefinition(
             name = "cornell-blocks",
             world = cornellBox(listOf(tall, short), samples, width).world,
+            camera = cornellBox(listOf(), samples, width).camera
+        )
+    }
+
+    /** The Next Week, chapter 9.2: the same room, with the blocks replaced by smoke. */
+    fun cornellSmoke(samples: Int = 200, width: Int = 600): SceneDefinition {
+        val red = Lambertian(Color(0.65f, 0.05f, 0.05f))
+        val white = Lambertian(Color(0.73f, 0.73f, 0.73f))
+        val green = Lambertian(Color(0.12f, 0.45f, 0.15f))
+        val light = DiffuseLight(Color(7f, 7f, 7f))
+
+        val tall = Translate(
+            RotateY(box(Point(0f, 0f, 0f), Point(165f, 330f, 165f), white), 15.0f),
+            Vector(265f, 0f, 295f)
+        )
+        val short = Translate(
+            RotateY(box(Point(0f, 0f, 0f), Point(165f, 165f, 165f), white), -18.0f),
+            Vector(130f, 0f, 65f)
+        )
+
+        return SceneDefinition(
+            name = "cornell-smoke",
+            world = HittableList(
+                mutableListOf(
+                    Quad(Point(555f, 0f, 0f), Vector(0f, 555f, 0f), Vector(0f, 0f, 555f), green),
+                    Quad(Point(0f, 0f, 0f), Vector(0f, 555f, 0f), Vector(0f, 0f, 555f), red),
+                    // A wider, dimmer lamp than the solid box scene uses.
+                    Quad(Point(113f, 554f, 127f), Vector(330f, 0f, 0f), Vector(0f, 0f, 305f), light),
+                    Quad(Point(0f, 555f, 0f), Vector(555f, 0f, 0f), Vector(0f, 0f, 555f), white),
+                    Quad(Point(0f, 0f, 0f), Vector(555f, 0f, 0f), Vector(0f, 0f, 555f), white),
+                    Quad(Point(0f, 0f, 555f), Vector(555f, 0f, 0f), Vector(0f, 555f, 0f), white),
+                    ConstantMedium(tall, 0.01f, Color(0f, 0f, 0f)),
+                    ConstantMedium(short, 0.01f, Color(1f, 1f, 1f))
+                )
+            ),
             camera = cornellBox(listOf(), samples, width).camera
         )
     }

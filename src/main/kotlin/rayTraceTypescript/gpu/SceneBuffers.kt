@@ -12,7 +12,9 @@ package rayTraceTypescript.gpu
  *  - [quads]: 16 floats - corner (3), the two edges (3 + 3), the basis vector w (3),
  *    the plane normal (3) and its offset
  *  - [materialInts]: 2 ints per material - type (0 Lambertian, 1 Metal, 2 Dielectric,
- *    3 DiffuseLight), texture index
+ *    3 DiffuseLight, 4 Isotropic), texture index
+ *  - [mediumInts] / [mediumFloats]: per volume - the node its boundary starts at, the phase
+ *    function's material, and the negated inverse density
  *  - [materialFloats]: 2 floats per material - fuzz, refraction index
  *  - [textureInts]: 4 ints per texture - type (0 solid, 1 checker, 2 image, 3 missing image) + payload
  *  - [textureFloats]: 4 floats per texture - solid rgb, the checker's inverted scale, or a
@@ -29,6 +31,8 @@ class SceneBuffers(
     val triangleMaterials: IntArray,
     val quads: FloatArray,
     val quadMaterials: IntArray,
+    val mediumInts: IntArray,
+    val mediumFloats: FloatArray,
     val materialInts: IntArray,
     val materialFloats: FloatArray,
     val textureInts: IntArray,
@@ -43,6 +47,7 @@ class SceneBuffers(
     val sphereCount: Int get() = sphereMaterials.size
     val triangleCount: Int get() = triangleMaterials.size
     val quadCount: Int get() = quadMaterials.size
+    val mediumCount: Int get() = mediumFloats.size
 
     companion object {
         const val NODE_BOUNDS_STRIDE = 6
@@ -50,6 +55,7 @@ class SceneBuffers(
         const val SPHERE_STRIDE = 8
         const val TRIANGLE_STRIDE = 12
         const val QUAD_STRIDE = 16
+        const val MEDIUM_INT_STRIDE = 2
         const val MATERIAL_INT_STRIDE = 2
         const val MATERIAL_FLOAT_STRIDE = 2
         const val TEXTURE_INT_STRIDE = 4
@@ -62,6 +68,7 @@ class SceneBuffers(
         const val LEAF_SPHERE = -1
         const val LEAF_TRIANGLE = -2
         const val LEAF_QUAD = -3
+        const val LEAF_MEDIUM = -4
 
         /** Depth of the traversal stack reserved in the kernel. */
         const val MAX_TRAVERSAL_DEPTH = 64

@@ -4,6 +4,7 @@ import rayTraceTypescript.Color
 import rayTraceTypescript.Point
 import rayTraceTypescript.Vector
 import rayTraceTypescript.materials.Dielectric
+import rayTraceTypescript.materials.Isotropic
 import rayTraceTypescript.materials.DiffuseLight
 import rayTraceTypescript.materials.Lambertian
 import rayTraceTypescript.materials.Material
@@ -11,6 +12,7 @@ import rayTraceTypescript.materials.Metal
 import rayTraceTypescript.objects.BvhNode
 import rayTraceTypescript.objects.Hittable
 import rayTraceTypescript.objects.HittableList
+import rayTraceTypescript.objects.ConstantMedium
 import rayTraceTypescript.objects.Quad
 import rayTraceTypescript.objects.RotateY
 import rayTraceTypescript.objects.Translate
@@ -42,6 +44,8 @@ class SceneFlattener private constructor() {
     private val triangleMaterials = ArrayList<Int>()
     private val quads = ArrayList<Float>()
     private val quadMaterials = ArrayList<Int>()
+    private val mediumInts = ArrayList<Int>()
+    private val mediumFloats = ArrayList<Float>()
     private val materialInts = ArrayList<Int>()
     private val materialFloats = ArrayList<Float>()
     private val textureInts = ArrayList<Int>()
@@ -75,6 +79,8 @@ class SceneFlattener private constructor() {
             triangleMaterials = triangleMaterials.toIntArray(),
             quads = quads.toFloatArray(),
             quadMaterials = quadMaterials.toIntArray(),
+            mediumInts = mediumInts.toIntArray(),
+            mediumFloats = mediumFloats.toFloatArray(),
             materialInts = materialInts.toIntArray(),
             materialFloats = materialFloats.toFloatArray(),
             textureInts = textureInts.toIntArray(),
@@ -93,6 +99,7 @@ class SceneFlattener private constructor() {
             is Sphere -> emitSphere(hittable, transform)
             is Triangle -> emitTriangle(hittable, transform)
             is Quad -> emitQuad(hittable, transform)
+            is ConstantMedium -> emitMedium(hittable, depth, transform)
             // Instances fold into the primitives below them instead of becoming nodes.
             is Translate -> emit(hittable.obj, depth, transform.after(Transform.translation(hittable.offset)))
             is RotateY -> emit(hittable.obj, depth, transform.after(Transform.rotation(hittable.cosTheta, hittable.sinTheta)))
@@ -118,6 +125,22 @@ class SceneFlattener private constructor() {
             emitRange(objects, start, mid, depth + 1, transform),
             emitRange(objects, mid, end, depth + 1, transform)
         )
+    }
+
+    /**
+     * A volume emits its boundary as an ordinary subtree and then a leaf pointing at it; the
+     * kernel runs a second, nested traversal over that subtree to find where a ray enters and
+     * leaves the fog.
+     */
+    private fun emitMedium(medium: ConstantMedium, depth: Int, transform: Transform): Int {
+        val boundaryRoot = emit(medium.boundary, depth + 1, transform)
+        val index = mediumFloats.size
+        mediumInts.add(boundaryRoot)
+        mediumInts.add(registerMaterial(medium.phaseFunction))
+        mediumFloats.add(medium.negativeInverseDensity)
+
+        val bounds = FloatArray(SceneBuffers.NODE_BOUNDS_STRIDE) { boundsAt(boundaryRoot, it) }
+        return emitNode(bounds, index, SceneBuffers.LEAF_MEDIUM)
     }
 
     private fun emitQuad(original: Quad, transform: Transform): Int {
@@ -231,6 +254,12 @@ class SceneFlattener private constructor() {
             }
             is DiffuseLight -> {
                 materialInts.add(3)
+                materialInts.add(registerTexture(material.texture))
+                materialFloats.add(0.0f)
+                materialFloats.add(0.0f)
+            }
+            is Isotropic -> {
+                materialInts.add(4)
                 materialInts.add(registerTexture(material.texture))
                 materialFloats.add(0.0f)
                 materialFloats.add(0.0f)

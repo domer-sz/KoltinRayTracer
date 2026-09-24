@@ -5,8 +5,10 @@
 #define LEAF_SPHERE   (-1)
 #define LEAF_TRIANGLE (-2)
 #define LEAF_QUAD     (-3)
+#define LEAF_MEDIUM   (-4)
 #define TRIANGLE_PARALLEL_EPSILON 1e-8f
 #define STACK_SIZE    64
+#define BOUNDARY_STACK_SIZE 32
 #define REJECTION_CAP 64
 
 // ---------------------------------------------------------------- random numbers
@@ -48,6 +50,11 @@ inline float3 random_in_unit_sphere(Rng* rng) {
         if (dot(p, p) < 1.0f) return p;
     }
     return (float3)(0.0f, 0.0f, 1.0f);
+}
+
+inline float3 random_unit_vector(Rng* rng) {
+    float3 p = random_in_unit_sphere(rng);
+    return p / length(p);
 }
 
 inline float3 random_on_hemisphere(Rng* rng, float3 normal) {
@@ -215,14 +222,114 @@ inline bool quad_hit(__global const float* quads, __global const int* quadMateri
     return true;
 }
 
+// Dispatch for the plain primitives; volumes are handled separately because they need
+// their own traversal and a random number.
+inline bool primitive_hit(__global const float* spheres, __global const int* sphereMaterials,
+                          __global const float* triangles, __global const int* triangleMaterials,
+                          __global const float* quads, __global const int* quadMaterials,
+                          int kind, int index, float3 origin, float3 direction, float time,
+                          float tMin, float tMax, HitRecord* rec) {
+    if (kind == LEAF_SPHERE) {
+        return sphere_hit(spheres, sphereMaterials, index, origin, direction, time, tMin, tMax, rec);
+    }
+    if (kind == LEAF_TRIANGLE) {
+        return triangle_hit(triangles, triangleMaterials, index, origin, direction, tMin, tMax, rec);
+    }
+    if (kind == LEAF_QUAD) {
+        return quad_hit(quads, quadMaterials, index, origin, direction, tMin, tMax, rec);
+    }
+    return false;
+}
+
+// Traversal of a volume's boundary. Separate from world_hit because OpenCL has no recursion
+// and a medium's boundary is plain geometry - it can never contain another volume.
+inline bool boundary_hit(__global const float* nodeBounds, __global const int* nodeLinks,
+                         __global const float* spheres, __global const int* sphereMaterials,
+                         __global const float* triangles, __global const int* triangleMaterials,
+                         __global const float* quads, __global const int* quadMaterials,
+                         int rootNode, float3 origin, float3 direction, float time,
+                         float tMin, float tMax, HitRecord* rec) {
+    int stack[BOUNDARY_STACK_SIZE];
+    int sp = 0;
+    stack[sp++] = rootNode;
+
+    bool hitAnything = false;
+    float closest = tMax;
+
+    while (sp > 0) {
+        int node = stack[--sp];
+        if (!aabb_hit(nodeBounds, node, origin, direction, tMin, closest)) continue;
+
+        int first = nodeLinks[node * 2];
+        int second = nodeLinks[node * 2 + 1];
+
+        if (second < 0) {
+            HitRecord candidate;
+            if (primitive_hit(spheres, sphereMaterials, triangles, triangleMaterials, quads, quadMaterials,
+                              second, first, origin, direction, time, tMin, closest, &candidate)) {
+                hitAnything = true;
+                closest = candidate.t;
+                *rec = candidate;
+            }
+        } else if (sp + 2 <= BOUNDARY_STACK_SIZE) {
+            stack[sp++] = first;
+            stack[sp++] = second;
+        }
+    }
+    return hitAnything;
+}
+
+// ConstantMedium.hit: find where the ray enters and leaves the boundary, then stop it at a
+// random depth drawn from the density. A depth past the far wall means the ray passes through.
+inline bool medium_hit(__global const float* nodeBounds, __global const int* nodeLinks,
+                       __global const float* spheres, __global const int* sphereMaterials,
+                       __global const float* triangles, __global const int* triangleMaterials,
+                       __global const float* quads, __global const int* quadMaterials,
+                       __global const int* mediumInts, __global const float* mediumFloats,
+                       int index, float3 origin, float3 direction, float time,
+                       float tMin, float tMax, Rng* rng, HitRecord* rec) {
+    int boundaryRoot = mediumInts[index * 2];
+    int material = mediumInts[index * 2 + 1];
+    float negativeInverseDensity = mediumFloats[index];
+
+    HitRecord entry;
+    HitRecord exit;
+    if (!boundary_hit(nodeBounds, nodeLinks, spheres, sphereMaterials, triangles, triangleMaterials,
+                      quads, quadMaterials, boundaryRoot, origin, direction, time,
+                      -INFINITY, INFINITY, &entry)) return false;
+    if (!boundary_hit(nodeBounds, nodeLinks, spheres, sphereMaterials, triangles, triangleMaterials,
+                      quads, quadMaterials, boundaryRoot, origin, direction, time,
+                      entry.t + 0.0001f, INFINITY, &exit)) return false;
+
+    float start = entry.t < tMin ? tMin : entry.t;
+    float end = exit.t > tMax ? tMax : exit.t;
+    if (start >= end) return false;
+    if (start < 0.0f) start = 0.0f;
+
+    float rayLength = length(direction);
+    float distanceInside = (end - start) * rayLength;
+    float hitDistance = negativeInverseDensity * log(rng_float(rng));
+    if (hitDistance > distanceInside) return false;
+
+    rec->t = start + hitDistance / rayLength;
+    rec->point = origin + rec->t * direction;
+    rec->normal = (float3)(1.0f, 0.0f, 0.0f);          // arbitrary: fog has no surface
+    rec->frontFace = true;
+    rec->material = material;
+    rec->u = 0.0f;
+    rec->v = 0.0f;
+    return true;
+}
+
 // Closest hit over the flattened tree; equivalent to BvhNode.hit narrowing the interval
 // as it descends.
 inline bool world_hit(__global const float* nodeBounds, __global const int* nodeLinks,
                       __global const float* spheres, __global const int* sphereMaterials,
                       __global const float* triangles, __global const int* triangleMaterials,
                       __global const float* quads, __global const int* quadMaterials,
+                      __global const int* mediumInts, __global const float* mediumFloats,
                       int rootNode, float3 origin, float3 direction, float time,
-                      float tMin, float tMax, HitRecord* rec) {
+                      float tMin, float tMax, Rng* rng, HitRecord* rec) {
     int stack[STACK_SIZE];
     int sp = 0;
     stack[sp++] = rootNode;
@@ -239,14 +346,12 @@ inline bool world_hit(__global const float* nodeBounds, __global const int* node
 
         if (second < 0) {
             HitRecord candidate;
-            bool hit = false;
-            if (second == LEAF_SPHERE) {
-                hit = sphere_hit(spheres, sphereMaterials, first, origin, direction, time, tMin, closest, &candidate);
-            } else if (second == LEAF_TRIANGLE) {
-                hit = triangle_hit(triangles, triangleMaterials, first, origin, direction, tMin, closest, &candidate);
-            } else if (second == LEAF_QUAD) {
-                hit = quad_hit(quads, quadMaterials, first, origin, direction, tMin, closest, &candidate);
-            }
+            bool hit = second == LEAF_MEDIUM
+                ? medium_hit(nodeBounds, nodeLinks, spheres, sphereMaterials, triangles, triangleMaterials,
+                             quads, quadMaterials, mediumInts, mediumFloats, first, origin, direction, time,
+                             tMin, closest, rng, &candidate)
+                : primitive_hit(spheres, sphereMaterials, triangles, triangleMaterials, quads, quadMaterials,
+                                second, first, origin, direction, time, tMin, closest, &candidate);
             if (hit) {
                 hitAnything = true;
                 closest = candidate.t;
@@ -406,6 +511,13 @@ inline bool scatter(__global const int* matI, __global const float* matF,
 
     if (type == 3) return false;                          // DiffuseLight: the path ends here
 
+    if (type == 4) {                                      // Isotropic: fog scatters anywhere
+        *attenuation = texture_value(texI, texF, images, perlinVectors, perlinPermutations,
+                                     texture, rec->u, rec->v, rec->point);
+        *scattered = random_unit_vector(rng);
+        return true;
+    }
+
     if (type == 0) {                                      // Lambertian
         float3 direction = random_on_hemisphere(rng, rec->normal);
         if (near_zero(direction)) direction = rec->normal;
@@ -456,6 +568,8 @@ __kernel void render(__global const float* cam,
                      __global const int* triangleMaterials,
                      __global const float* quads,
                      __global const int* quadMaterials,
+                     __global const int* mediumInts,
+                     __global const float* mediumFloats,
                      __global const int* matI,
                      __global const float* matF,
                      __global const int* texI,
@@ -516,7 +630,8 @@ __kernel void render(__global const float* cam,
         for (int depth = 0; depth < maxReflectionDepth; depth++) {
             HitRecord rec;
             if (world_hit(nodeBounds, nodeLinks, spheres, sphereMaterials, triangles, triangleMaterials,
-                          quads, quadMaterials, rootNode, origin, direction, time, 0.001f, INFINITY, &rec)) {
+                          quads, quadMaterials, mediumInts, mediumFloats, rootNode,
+                          origin, direction, time, 0.001f, INFINITY, &rng, &rec)) {
                 sampleColor += throughput * material_emitted(matI, texI, texF, images,
                                                              perlinVectors, perlinPermutations, &rec);
                 float3 attenuation;
