@@ -20,6 +20,7 @@ data class CameraSetup(
     val pixelDeltaV: Vector,
     val defocusAngle: Float,
     val background: Color? = null,
+    val lights: rayTraceTypescript.objects.Hittable? = null,
     val defocusDiscU: Vector,
     val defocusDiscV: Vector
 ) {

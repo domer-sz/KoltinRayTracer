@@ -7,6 +7,8 @@ import rayTraceTypescript.Ray
 import rayTraceTypescript.UV
 import rayTraceTypescript.Vector
 import rayTraceTypescript.materials.Material
+import rayTraceTypescript.utils.Onb
+import rayTraceTypescript.utils.pi
 import kotlin.math.PI
 import kotlin.math.sqrt
 
@@ -54,6 +56,26 @@ class Sphere constructor(val center: Ray, val radius: Float, val material: Mater
     }
 
     override fun aabbBoundingBox(): Aabb = this.bbox
+
+    /**
+     * A sphere seen from outside covers a cone of directions; sampling it evenly inside that
+     * cone gives one over its solid angle. Only meaningful for a still sphere, which is what
+     * a light is.
+     */
+    override fun pdfValue(origin: Point, direction: Vector): Float {
+        hit(Ray(origin, direction), Interval(0.001f, Float.POSITIVE_INFINITY)) ?: return 0.0f
+
+        val distanceSquared = (center.at(0.0f) - origin).lengthSquared()
+        val cosThetaMax = sqrt(1.0f - radius * radius / distanceSquared)
+        val solidAngle = 2.0f * pi * (1.0f - cosThetaMax)
+        return 1.0f / solidAngle
+    }
+
+    override fun random(origin: Point): Vector {
+        val toCentre = center.at(0.0f) - origin
+        val distanceSquared = toCentre.lengthSquared()
+        return Onb(toCentre).transform(Vector.randomToSphere(radius, distanceSquared))
+    }
 
     companion object {
         fun getSphereUv(point: Vector): UV {

@@ -6,6 +6,8 @@ import rayTraceTypescript.Point
 import rayTraceTypescript.Ray
 import rayTraceTypescript.Vector
 import rayTraceTypescript.objects.Hittable
+import rayTraceTypescript.pdf.HittablePdf
+import rayTraceTypescript.pdf.MixturePdf
 import rayTraceTypescript.utils.infinity
 import rayTraceTypescript.utils.RandomSource
 import rayTraceTypescript.utils.randomFloat
@@ -60,7 +62,13 @@ class CpuRenderer : Renderer {
             return record.attenuation * rayColor(specular, reflectionDepth - 1, world, setup)
         }
 
-        val density = record.pdf ?: return emitted
+        // Half the samples towards the lights when the scene names any, the rest by the
+        // surface's own density.
+        val surfaceDensity = record.pdf ?: return emitted
+        val density = setup.lights
+            ?.let { MixturePdf(HittablePdf(it, hit.point), surfaceDensity) }
+            ?: surfaceDensity
+
         val scattered = Ray(hit.point, density.generate(), ray.time)
         val pdfValue = density.value(scattered.direction)
         if (pdfValue < MINIMUM_PDF) return emitted      // a direction this unlikely would blow up

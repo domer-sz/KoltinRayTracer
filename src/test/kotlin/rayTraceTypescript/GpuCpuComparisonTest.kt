@@ -43,6 +43,23 @@ class GpuCpuComparisonTest {
     }
 
     @Test
+    fun `gpu matches the cpu render when samples are aimed at the lights`() {
+        assumeOpenCl()
+        val light = Quad(
+            Point(-1.5f, 3.0f, -1.5f), Vector(3.0f, 0.0f, 0.0f), Vector(0.0f, 0.0f, 3.0f),
+            DiffuseLight(Color(6.0f, 6.0f, 6.0f))
+        )
+        val world = HittableList(
+            mutableListOf(
+                Sphere(Point(0.0f, -1000.0f, 0.0f), 1000.0f, Lambertian(Color(0.6f, 0.6f, 0.62f))),
+                Sphere(Point(0.0f, 0.8f, 0.0f), 0.8f, Lambertian(Color(0.75f, 0.35f, 0.2f))),
+                light
+            )
+        )
+        assertLooksTheSame(world, lit = true, lights = light)
+    }
+
+    @Test
     fun `gpu matches the cpu render for a volume`() {
         assumeOpenCl()
         assertLooksTheSame(fogScene(), lit = true)
@@ -89,8 +106,11 @@ class GpuCpuComparisonTest {
      * differs. The yardstick is therefore the noise itself: how far the GPU image sits from a
      * CPU image must be no worse than how far two CPU images with different seeds sit apart.
      */
-    private fun assertLooksTheSame(world: Hittable, lit: Boolean = false) {
-        val camera = testCamera().apply { if (lit) background = Color(0f, 0f, 0f) }
+    private fun assertLooksTheSame(world: Hittable, lit: Boolean = false, lights: Hittable? = null) {
+        val camera = testCamera().apply {
+            if (lit) background = Color(0f, 0f, 0f)
+            this.lights = lights
+        }
         val cpu = render(CpuRenderer(), world, camera, SEED)
         val cpuOtherSeed = render(CpuRenderer(), world, camera, OTHER_SEED)
         val gpu = render(GpuRenderer(), world, camera, SEED)

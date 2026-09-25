@@ -34,7 +34,7 @@ import kotlin.random.Random
 class GpuRenderer : Renderer {
 
     override fun render(world: Hittable, setup: CameraSetup, outputPath: Path): Long {
-        val scene = SceneFlattener.flatten(world)
+        val scene = SceneFlattener.flatten(world, setup.lights)
         val pixels = FloatArray(setup.totalPixels * 3)
 
         OpenClContext.create().use { cl ->
@@ -62,6 +62,7 @@ class GpuRenderer : Renderer {
                 val quadMaterials = readOnly(scene.quadMaterials)
                 val mediumInts = readOnly(scene.mediumInts)
                 val mediumFloats = readOnly(scene.mediumFloats)
+                val lights = readOnly(scene.lights)
                 val materialInts = readOnly(scene.materialInts)
                 val materialFloats = readOnly(scene.materialFloats)
                 val textureInts = readOnly(scene.textureInts)
@@ -86,7 +87,7 @@ class GpuRenderer : Renderer {
                 var arg = 0
                 for (buffer in listOf(
                     cameraBuffer, nodeBounds, nodeLinks, spheres, sphereMaterials,
-                    triangles, triangleMaterials, quads, quadMaterials, mediumInts, mediumFloats,
+                    triangles, triangleMaterials, quads, quadMaterials, mediumInts, mediumFloats, lights,
                     materialInts, materialFloats, textureInts, textureFloats, textureImages,
                     perlinVectors, perlinPermutations, output
                 )) {
@@ -100,6 +101,7 @@ class GpuRenderer : Renderer {
                 clSetKernelArg1i(kernel, arg++, setup.maxReflectionDepth)
                 clSetKernelArg1f(kernel, arg++, setup.pixelSamplesScale)
                 clSetKernelArg1i(kernel, arg++, scene.rootNode)
+                clSetKernelArg1i(kernel, arg++, scene.lightCount)
                 clSetKernelArg1l(kernel, arg, seed())
 
                 val progress = ProgressBar(setup.totalPixels)

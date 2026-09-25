@@ -75,6 +75,17 @@ inline float3 random_cosine_direction(Rng* rng) {
     return (float3)(cos(phi) * root, sin(phi) * root, sqrt(1.0f - r2));
 }
 
+/** A direction into the cone a sphere of [radius] covers from [distanceSquared] away. */
+inline float3 random_to_sphere(Rng* rng, float radius, float distanceSquared) {
+    float r1 = rng_float(rng);
+    float r2 = rng_float(rng);
+    float z = 1.0f + r2 * (sqrt(1.0f - radius * radius / distanceSquared) - 1.0f);
+
+    float phi = 2.0f * M_PI_F * r1;
+    float root = sqrt(1.0f - z * z);
+    return (float3)(cos(phi) * root, sin(phi) * root, z);
+}
+
 inline float3 random_on_hemisphere(Rng* rng, float3 normal) {
     float3 p = random_in_unit_sphere(rng);
     float3 onUnitSphere = p / length(p);
@@ -612,6 +623,77 @@ inline bool scatter(__global const int* matI, __global const float* matF,
     return true;
 }
 
+// ---------------------------------------------------------------- sampling the lights
+
+/** A direction from [origin] towards a random point on one of the lights, picked evenly. */
+inline float3 light_random(__global const float* quads, __global const float* spheres,
+                           __global const int* lights, int lightCount, float3 origin, Rng* rng) {
+    int pick = (int)(rng_float(rng) * (float)lightCount);
+    if (pick >= lightCount) pick = lightCount - 1;
+
+    int kind = lights[pick * 2];
+    int index = lights[pick * 2 + 1];
+
+    if (kind == LEAF_QUAD) {
+        __global const float* data = quads + index * 16;
+        float3 Q = (float3)(data[0], data[1], data[2]);
+        float3 u = (float3)(data[3], data[4], data[5]);
+        float3 v = (float3)(data[6], data[7], data[8]);
+        float3 point = Q + u * rng_float(rng) + v * rng_float(rng);
+        return point - origin;
+    }
+
+    __global const float* data = spheres + index * 8;
+    float3 centre = (float3)(data[0], data[1], data[2]);   // lights do not move
+    float radius = data[6];
+    float3 toCentre = centre - origin;
+    float distanceSquared = dot(toCentre, toCentre);
+
+    float3 u, v, w;
+    onb_build(toCentre, &u, &v, &w);
+    float3 sampled = random_to_sphere(rng, radius, distanceSquared);
+    return u * sampled.x + v * sampled.y + w * sampled.z;
+}
+
+/** How likely that direction was, averaged over the lights - Hittable.pdfValue in the kernel. */
+inline float light_pdf_value(__global const float* quads, __global const int* quadMaterials,
+                             __global const float* spheres, __global const int* sphereMaterials,
+                             __global const int* lights, int lightCount,
+                             float3 origin, float3 direction) {
+    float weight = 1.0f / (float)lightCount;
+    float sum = 0.0f;
+
+    for (int i = 0; i < lightCount; i++) {
+        int kind = lights[i * 2];
+        int index = lights[i * 2 + 1];
+        HitRecord rec;
+
+        if (kind == LEAF_QUAD) {
+            if (!quad_hit(quads, quadMaterials, index, origin, direction, 0.001f, INFINITY, &rec)) continue;
+            __global const float* data = quads + index * 16;
+            float3 u = (float3)(data[3], data[4], data[5]);
+            float3 v = (float3)(data[6], data[7], data[8]);
+            float area = length(cross(u, v));
+
+            float distanceSquared = rec.t * rec.t * dot(direction, direction);
+            float cosine = fabs(dot(direction, rec.normal) / length(direction));
+            if (cosine < TRIANGLE_PARALLEL_EPSILON) continue;
+            sum += weight * distanceSquared / (cosine * area);
+        } else {
+            if (!sphere_hit(spheres, sphereMaterials, index, origin, direction, 0.0f, 0.001f, INFINITY, &rec)) continue;
+            __global const float* data = spheres + index * 8;
+            float3 centre = (float3)(data[0], data[1], data[2]);
+            float radius = data[6];
+            float3 toCentre = centre - origin;
+            float distanceSquared = dot(toCentre, toCentre);
+            float cosThetaMax = sqrt(1.0f - radius * radius / distanceSquared);
+            float solidAngle = 2.0f * M_PI_F * (1.0f - cosThetaMax);
+            sum += weight / solidAngle;
+        }
+    }
+    return sum;
+}
+
 // ---------------------------------------------------------------- entry point
 
 __kernel void render(__global const float* cam,
@@ -625,6 +707,7 @@ __kernel void render(__global const float* cam,
                      __global const int* quadMaterials,
                      __global const int* mediumInts,
                      __global const float* mediumFloats,
+                     __global const int* lights,
                      __global const int* matI,
                      __global const float* matF,
                      __global const int* texI,
@@ -640,6 +723,7 @@ __kernel void render(__global const float* cam,
                      const int maxReflectionDepth,
                      const float pixelSamplesScale,
                      const int rootNode,
+                     const int lightCount,
                      const ulong seed) {
     int gid = get_global_id(0);
     int x = gid % width;
@@ -697,17 +781,30 @@ __kernel void render(__global const float* cam,
 
                 if (srec.skipPdf) {
                     throughput *= srec.attenuation;
+                    origin = rec.point;
+                    direction = srec.direction;
                 } else {
-                    // Sample from the density, then weigh the sample by how much the surface
-                    // actually scatters that way - that division is what keeps it unbiased.
-                    float density = scatter_pdf_value(&srec, srec.direction);
-                    if (density < 1e-8f) break;
-                    float surface = scattering_pdf(matI[rec.material * 2], rec.normal, srec.direction);
-                    throughput *= srec.attenuation * (surface / density);
-                }
+                    // Half the samples aimed at a light, half drawn by the surface itself.
+                    float3 chosen = srec.direction;
+                    if (lightCount > 0 && rng_float(&rng) < 0.5f) {
+                        chosen = light_random(quads, spheres, lights, lightCount, rec.point, &rng);
+                    }
 
-                origin = rec.point;
-                direction = srec.direction;
+                    float density = scatter_pdf_value(&srec, chosen);
+                    if (lightCount > 0) {
+                        density = 0.5f * density + 0.5f * light_pdf_value(quads, quadMaterials,
+                            spheres, sphereMaterials, lights, lightCount, rec.point, chosen);
+                    }
+                    if (density < 1e-8f) break;
+
+                    // Weigh the sample by how much the surface actually scatters that way;
+                    // that division is what keeps the estimate unbiased.
+                    float surface = scattering_pdf(matI[rec.material * 2], rec.normal, chosen);
+                    throughput *= srec.attenuation * (surface / density);
+
+                    origin = rec.point;
+                    direction = chosen;
+                }
             } else {
                 float3 escaped = background;
                 if (!flatBackground) {

@@ -2,7 +2,10 @@ package rayTraceTypescript.objects
 
 import rayTraceTypescript.Aabb
 import rayTraceTypescript.Interval
+import rayTraceTypescript.Point
 import rayTraceTypescript.Ray
+import rayTraceTypescript.Vector
+import rayTraceTypescript.utils.RandomSource
 
 //class HittableList(val objects: MutableList<Hittable>) : Hittable { //before bbox
 //
@@ -61,4 +64,16 @@ class HittableList(objects: MutableList<Hittable> = mutableListOf()) : Hittable 
     }
 
     override fun aabbBoundingBox(): Aabb = bbox
+
+    /** Sampling the list means picking one member at random, so the densities average. */
+    override fun pdfValue(origin: Point, direction: Vector): Float {
+        if (objects.isEmpty()) return 0.0f
+        val weight = 1.0f / objects.size
+        return objects.sumOf { (it.pdfValue(origin, direction) * weight).toDouble() }.toFloat()
+    }
+
+    override fun random(origin: Point): Vector {
+        if (objects.isEmpty()) return Vector(1.0f, 0.0f, 0.0f)
+        return objects[RandomSource.nextInt(0, objects.size - 1)].random(origin)
+    }
 }

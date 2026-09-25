@@ -46,6 +46,7 @@ class SceneFlattener private constructor() {
     private val quadMaterials = ArrayList<Int>()
     private val mediumInts = ArrayList<Int>()
     private val mediumFloats = ArrayList<Float>()
+    private val lights = ArrayList<Int>()
     private val materialInts = ArrayList<Int>()
     private val materialFloats = ArrayList<Float>()
     private val textureInts = ArrayList<Int>()
@@ -62,11 +63,13 @@ class SceneFlattener private constructor() {
     private var maxDepth = 0
 
     companion object {
-        fun flatten(world: Hittable): SceneBuffers = SceneFlattener().build(world)
+        fun flatten(world: Hittable, lights: Hittable? = null): SceneBuffers =
+            SceneFlattener().build(world, lights)
     }
 
-    private fun build(world: Hittable): SceneBuffers {
+    private fun build(world: Hittable, lightSources: Hittable?): SceneBuffers {
         val root = emit(world, depth = 1, transform = Transform.IDENTITY)
+        lightSources?.let { collectLights(it, Transform.IDENTITY) }
         require(maxDepth <= SceneBuffers.MAX_TRAVERSAL_DEPTH) {
             "Scene tree is $maxDepth levels deep, kernel stack holds ${SceneBuffers.MAX_TRAVERSAL_DEPTH}"
         }
@@ -81,6 +84,7 @@ class SceneFlattener private constructor() {
             quadMaterials = quadMaterials.toIntArray(),
             mediumInts = mediumInts.toIntArray(),
             mediumFloats = mediumFloats.toFloatArray(),
+            lights = lights.toIntArray(),
             materialInts = materialInts.toIntArray(),
             materialFloats = materialFloats.toFloatArray(),
             textureInts = textureInts.toIntArray(),
@@ -118,6 +122,35 @@ class SceneFlattener private constructor() {
         }
     }
 
+    /**
+     * Lights are written a second time, as bare geometry with no node: the renderer samples
+     * them directly, which is a different job from finding them along a ray.
+     */
+    private fun collectLights(hittable: Hittable, transform: Transform) {
+        when (hittable) {
+            is Quad -> {
+                val (index, _) = appendQuad(hittable, transform)
+                lights.add(SceneBuffers.LEAF_QUAD)
+                lights.add(index)
+            }
+            is Sphere -> {
+                val (index, _, _) = appendSphere(hittable, transform)
+                lights.add(SceneBuffers.LEAF_SPHERE)
+                lights.add(index)
+            }
+            is HittableList -> hittable.objects.forEach { collectLights(it, transform) }
+            is Translate -> collectLights(hittable.obj, transform.after(Transform.translation(hittable.offset)))
+            is RotateY -> collectLights(hittable.obj, transform.after(Transform.rotation(hittable.cosTheta, hittable.sinTheta)))
+            is BvhNode -> {
+                collectLights(hittable.left, transform)
+                if (hittable.left !== hittable.right) collectLights(hittable.right, transform)
+            }
+            else -> throw IllegalArgumentException(
+                "Only quads and spheres can be sampled as lights, not ${hittable::class.java.name}"
+            )
+        }
+    }
+
     private fun emitRange(objects: List<Hittable>, start: Int, end: Int, depth: Int, transform: Transform): Int {
         if (end - start == 1) return emit(objects[start], depth, transform)
         val mid = (start + end) / 2
@@ -143,7 +176,8 @@ class SceneFlattener private constructor() {
         return emitNode(bounds, index, SceneBuffers.LEAF_MEDIUM)
     }
 
-    private fun emitQuad(original: Quad, transform: Transform): Int {
+    /** Writes a quad's geometry and returns its index; the caller decides whether it gets a node. */
+    private fun appendQuad(original: Quad, transform: Transform): Pair<Int, Quad> {
         // Rebuilding the quad from transformed corners lets its own constructor work out the
         // plane, the uv basis and the padded box again.
         val quad = if (transform === Transform.IDENTITY) original
@@ -157,7 +191,11 @@ class SceneFlattener private constructor() {
         }
         quads.add(quad.d)
         quadMaterials.add(registerMaterial(quad.material))
+        return index to quad
+    }
 
+    private fun emitQuad(original: Quad, transform: Transform): Int {
+        val (index, quad) = appendQuad(original, transform)
         val box = quad.aabbBoundingBox()
         return emitNode(
             floatArrayOf(box.x.min, box.y.min, box.z.min, box.x.max, box.y.max, box.z.max),
@@ -190,12 +228,12 @@ class SceneFlattener private constructor() {
         )
     }
 
-    private fun emitSphere(sphere: Sphere, transform: Transform): Int {
+    /** Writes a sphere's geometry and returns its index. */
+    private fun appendSphere(sphere: Sphere, transform: Transform): Triple<Int, Point, Point> {
         val sphereIndex = sphereMaterials.size
         // A sphere is round: a rotation only moves its centre, so the radius survives untouched.
         val start = transform.point(sphere.center.origin)
         val end = transform.point(sphere.center.at(1.0f))
-        val radius = sphere.radius
 
         spheres.add(start.x)
         spheres.add(start.y)
@@ -203,9 +241,15 @@ class SceneFlattener private constructor() {
         spheres.add(end.x - start.x)
         spheres.add(end.y - start.y)
         spheres.add(end.z - start.z)
-        spheres.add(radius)
+        spheres.add(sphere.radius)
         spheres.add(0.0f)
         sphereMaterials.add(registerMaterial(sphere.material))
+        return Triple(sphereIndex, start, end)
+    }
+
+    private fun emitSphere(sphere: Sphere, transform: Transform): Int {
+        val (sphereIndex, start, end) = appendSphere(sphere, transform)
+        val radius = sphere.radius
 
         return emitNode(
             floatArrayOf(

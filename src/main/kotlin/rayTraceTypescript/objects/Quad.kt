@@ -6,6 +6,7 @@ import rayTraceTypescript.Point
 import rayTraceTypescript.Ray
 import rayTraceTypescript.Vector
 import rayTraceTypescript.materials.Material
+import rayTraceTypescript.utils.RandomSource
 import kotlin.math.abs
 
 /**
@@ -22,6 +23,9 @@ class Quad(val q: Point, val u: Vector, val v: Vector, val material: Material) :
 
     /** Turns a point on the plane into (alpha, beta) coordinates of the u/v basis. */
     val w: Vector = cross / Vector.dotProduct(cross, cross)
+
+    /** Area of the parallelogram, which is what makes sampling it uniform. */
+    val area: Float = cross.length()
 
     private val bbox: Aabb = Aabb(
         Aabb.fromPoints(q, (q + u + v).toPoint()),
@@ -45,6 +49,25 @@ class Quad(val q: Point, val u: Vector, val v: Vector, val material: Material) :
     }
 
     override fun aabbBoundingBox(): Aabb = bbox
+
+    /**
+     * Turns the quad's area into a density over directions: the further away and the more
+     * edge-on it is seen, the smaller the solid angle it covers from [origin].
+     */
+    override fun pdfValue(origin: Point, direction: Vector): Float {
+        val hit = hit(Ray(origin, direction), Interval(0.001f, Float.POSITIVE_INFINITY)) ?: return 0.0f
+
+        val distanceSquared = hit.t * hit.t * direction.lengthSquared()
+        val cosine = abs(Vector.dotProduct(direction, hit.normal) / direction.length())
+        if (cosine < PARALLEL_EPSILON) return 0.0f
+
+        return distanceSquared / (cosine * area)
+    }
+
+    override fun random(origin: Point): Vector {
+        val point = q + u * RandomSource.nextFloat() + v * RandomSource.nextFloat()
+        return point - origin
+    }
 
     companion object {
         const val PARALLEL_EPSILON = 1e-8f

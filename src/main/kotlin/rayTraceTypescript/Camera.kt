@@ -26,6 +26,12 @@ class Camera {
     var background: Color? = null
 
     /**
+     * Shapes worth aiming samples at - the lights. Given them, every diffuse bounce sends half
+     * its samples straight at a light, which is what clears the noise out of a dim room.
+     */
+    var lights: Hittable? = null
+
+    /**
      * Renders [world] into [outputPath] and returns the number of primary rays traced.
      * The backend (GPU or CPU) is picked by [RendererFactory]; both share this camera geometry.
      */
@@ -79,6 +85,7 @@ class Camera {
             pixelDeltaV = pixelDeltaV,
             defocusAngle = defocusAngle,
             background = background,
+            lights = lights,
             defocusDiscU = u * defocusRadius,
             defocusDiscV = v * defocusRadius
         )

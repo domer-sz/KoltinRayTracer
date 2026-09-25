@@ -15,6 +15,7 @@ package rayTraceTypescript.gpu
  *    3 DiffuseLight, 4 Isotropic), texture index
  *  - [mediumInts] / [mediumFloats]: per volume - the node its boundary starts at, the phase
  *    function's material, and the negated inverse density
+ *  - [lights]: 2 ints per light - which primitive buffer it lives in and its index there
  *  - [materialFloats]: 2 floats per material - fuzz, refraction index
  *  - [textureInts]: 4 ints per texture - type (0 solid, 1 checker, 2 image, 3 missing image) + payload
  *  - [textureFloats]: 4 floats per texture - solid rgb, the checker's inverted scale, or a
@@ -33,6 +34,7 @@ class SceneBuffers(
     val quadMaterials: IntArray,
     val mediumInts: IntArray,
     val mediumFloats: FloatArray,
+    val lights: IntArray,
     val materialInts: IntArray,
     val materialFloats: FloatArray,
     val textureInts: IntArray,
@@ -48,6 +50,7 @@ class SceneBuffers(
     val triangleCount: Int get() = triangleMaterials.size
     val quadCount: Int get() = quadMaterials.size
     val mediumCount: Int get() = mediumFloats.size
+    val lightCount: Int get() = lights.size / 2
 
     companion object {
         const val NODE_BOUNDS_STRIDE = 6

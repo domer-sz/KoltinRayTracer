@@ -41,6 +41,7 @@ object BookScenes {
         "cornell-blocks" to { cornellBlocks() },
         "cornell-smoke" to { cornellSmoke() },
         "final-week" to { finalWeek() },
+        "cornell-final" to { cornellFinal() },
         "model" to { model() }
     )
 
@@ -319,6 +320,41 @@ object BookScenes {
                 vUp = Vector(0f, 1f, 0f)
                 defocusAngle = 0f
             }
+        )
+    }
+
+    /**
+     * The Rest of Your Life, chapter 13: the Cornell box with the tall block and a glass
+     * sphere, and both the lamp and that sphere named as things worth aiming samples at.
+     *
+     * The book renders it at 1000 samples. Turning the lights off (-Drt.lights=off) leaves
+     * exactly the same scene sampled the way The Next Week did it, which is the comparison the
+     * whole book is about.
+     */
+    fun cornellFinal(samples: Int = 200, width: Int = 600): SceneDefinition {
+        val white = Lambertian(Color(0.73f, 0.73f, 0.73f))
+        val glass = Dielectric(1.5f)
+
+        val tall = Translate(
+            RotateY(box(Point(0f, 0f, 0f), Point(165f, 330f, 165f), white), 15.0f),
+            Vector(265f, 0f, 295f)
+        )
+        val glassSphere = Sphere(Point(190f, 90f, 190f), 90f, glass)
+
+        val scene = cornellBox(listOf(tall, glassSphere), samples, width)
+
+        // The material here is never asked for: these stand in only to be sampled towards.
+        val lights = HittableList(
+            mutableListOf(
+                Quad(Point(343f, 554f, 332f), Vector(-130f, 0f, 0f), Vector(0f, 0f, -105f), white),
+                Sphere(Point(190f, 90f, 190f), 90f, white)
+            )
+        )
+
+        return SceneDefinition(
+            name = "cornell-final",
+            world = scene.world,
+            camera = scene.camera.apply { this.lights = lights }
         )
     }
 
