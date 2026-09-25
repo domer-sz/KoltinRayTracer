@@ -15,7 +15,7 @@ Model files agree on no units or origin, so `standingOnFloor()` is the default p
 Every scene from the three books lives in `scenes/BookScenes` as a named builder returning a
 `SceneDefinition`; `-Drt.scene=<name>` picks one (`cornell-final`, `final-week`, `cornell-smoke`,
 `perlin-spheres`, `quads`, …, and the old `1|2|3` still resolve). `-Drt.samples`, `-Drt.width`,
-`-Drt.depth` scale any scene from the command line, since the books quote their finales at sample
+`-Drt.depth` and `-Drt.aspect` scale and reframe any scene from the command line, since the books quote their finales at sample
 counts that take hours, and `-Drt.out` redirects the render away from the committed `image.ppm`.
 
 Shading follows The Rest of Your Life. A material returns a `ScatterRecord`: a diffuse surface

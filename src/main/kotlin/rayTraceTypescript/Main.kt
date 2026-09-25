@@ -21,6 +21,9 @@ fun main() {
     System.getProperty("rt.samples")?.toIntOrNull()?.let { scene.camera.samplesPerPixel = it }
     System.getProperty("rt.width")?.toIntOrNull()?.let { scene.camera.imageWidth = it }
     System.getProperty("rt.depth")?.toIntOrNull()?.let { scene.camera.maxReflectionDepth = it }
+    // A scene's aspect ratio is part of its framing, but a wider one is sometimes wanted -
+    // the books' square rooms do not fit a 16:9 screen.
+    System.getProperty("rt.aspect")?.toFloatOrNull()?.let { scene.camera.aspectRatio = it }
     // -Drt.lights=off renders the same scene without aiming any samples at its lights.
     if (System.getProperty("rt.lights") == "off") scene.camera.lights = null
     println("Scene: ${scene.name} (${scene.camera.imageWidth}px, ${scene.camera.samplesPerPixel} spp)")
