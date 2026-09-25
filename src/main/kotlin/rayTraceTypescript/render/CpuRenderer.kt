@@ -52,11 +52,23 @@ class CpuRenderer : Renderer {
         val hit = world.hit(ray, Interval(0.001f, infinity))
             ?: return setup.background ?: skyGradient(ray)
 
-        val emitted = hit.material.emitted(hit.u, hit.v, hit.point)
-        val scatteredResult = hit.material.scatter(ray, hit) ?: return emitted
+        val emitted = hit.material.emitted(ray, hit)
+        val record = hit.material.scatter(ray, hit) ?: return emitted
 
-        val incoming = rayColor(scatteredResult.scattered, reflectionDepth - 1, world, setup)
-        return emitted + incoming * scatteredResult.albedo
+        // Mirrors and glass reflect into one direction; there is no density to sample.
+        record.skipPdfRay?.let { specular ->
+            return record.attenuation * rayColor(specular, reflectionDepth - 1, world, setup)
+        }
+
+        val density = record.pdf ?: return emitted
+        val scattered = Ray(hit.point, density.generate(), ray.time)
+        val pdfValue = density.value(scattered.direction)
+        if (pdfValue < MINIMUM_PDF) return emitted      // a direction this unlikely would blow up
+
+        val scatteringPdf = hit.material.scatteringPdf(ray, hit, scattered)
+        val incoming = rayColor(scattered, reflectionDepth - 1, world, setup)
+
+        return emitted + (record.attenuation * incoming * scatteringPdf) / pdfValue
     }
 
     /** The blue-to-white sky of the first book, used when a scene sets no background. */
@@ -69,6 +81,9 @@ class CpuRenderer : Renderer {
     }
 
     companion object {
+        /** Below this a density is numerically useless and the sample is dropped. */
+        private const val MINIMUM_PDF = 1e-8f
+
         fun getRay(x: Float, y: Float, setup: CameraSetup): Ray {
             val offset = sampleSquare()
             val pixelSample = Point(

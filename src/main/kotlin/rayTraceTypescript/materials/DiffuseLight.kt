@@ -1,7 +1,6 @@
 package rayTraceTypescript.materials
 
 import rayTraceTypescript.Color
-import rayTraceTypescript.Point
 import rayTraceTypescript.Ray
 import rayTraceTypescript.objects.Hit
 import rayTraceTypescript.textures.SolidColorTexture
@@ -11,7 +10,10 @@ import rayTraceTypescript.textures.Texture
 class DiffuseLight(val texture: Texture) : Material {
     constructor(color: Color) : this(SolidColorTexture(color))
 
-    override fun scatter(rayIn: Ray, hit: Hit): ScatteredResult? = null
-
-    override fun emitted(u: Float, v: Float, point: Point): Color = texture.value(u, v, point)
+    /**
+     * Light leaves only through the front. A lamp lit from behind would otherwise send light
+     * out of the back of the ceiling, and sampling it from there would be wasted work.
+     */
+    override fun emitted(rayIn: Ray, hit: Hit): Color =
+        if (!hit.frontFace) Color(0.0f, 0.0f, 0.0f) else texture.value(hit.u, hit.v, hit.point)
 }

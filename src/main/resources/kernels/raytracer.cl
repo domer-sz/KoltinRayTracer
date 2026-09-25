@@ -57,6 +57,24 @@ inline float3 random_unit_vector(Rng* rng) {
     return p / length(p);
 }
 
+// An orthonormal basis around a normal, so a direction drawn in a z-up frame can be turned
+// into world space - the kernel's copy of utils/Onb.
+inline void onb_build(float3 normal, float3* u, float3* v, float3* w) {
+    *w = normal / length(normal);
+    float3 a = fabs(w->x) > 0.9f ? (float3)(0.0f, 1.0f, 0.0f) : (float3)(1.0f, 0.0f, 0.0f);
+    float3 crossed = cross(*w, a);
+    *v = crossed / length(crossed);
+    *u = cross(*w, *v);
+}
+
+inline float3 random_cosine_direction(Rng* rng) {
+    float r1 = rng_float(rng);
+    float r2 = rng_float(rng);
+    float phi = 2.0f * M_PI_F * r1;
+    float root = sqrt(r2);
+    return (float3)(cos(phi) * root, sin(phi) * root, sqrt(1.0f - r2));
+}
+
 inline float3 random_on_hemisphere(Rng* rng, float3 normal) {
     float3 p = random_in_unit_sphere(rng);
     float3 onUnitSphere = p / length(p);
@@ -495,9 +513,40 @@ inline float3 material_emitted(__global const int* matI,
                                __global const uchar* images,
                                __global const float* perlinVectors, __global const int* perlinPermutations,
                                const HitRecord* rec) {
-    if (matI[rec->material * 2] != 3) return (float3)(0.0f, 0.0f, 0.0f);
+    // Only emissive materials, and only through their front: a lamp does not light the room
+    // through the back of the ceiling.
+    if (matI[rec->material * 2] != 3 || !rec->frontFace) return (float3)(0.0f, 0.0f, 0.0f);
     return texture_value(texI, texF, images, perlinVectors, perlinPermutations,
                          matI[rec->material * 2 + 1], rec->u, rec->v, rec->point);
+}
+
+/**
+ * What a material does with a ray, the kernel's copy of materials/ScatterRecord: either a
+ * direction drawn from a density ([pdfKind], to be divided out), or the single direction a
+ * mirror or a piece of glass sends the ray into ([skipPdf]).
+ */
+#define PDF_COSINE 0
+#define PDF_SPHERE 1
+
+typedef struct {
+    float3 attenuation;
+    float3 direction;
+    float3 pdfAxis;                                       // the cosine density's normal
+    bool skipPdf;
+    int pdfKind;
+} ScatterRec;
+
+inline float scatter_pdf_value(const ScatterRec* srec, float3 direction) {
+    if (srec->pdfKind == PDF_SPHERE) return 1.0f / (4.0f * M_PI_F);
+    float cosine = dot(direction / length(direction), srec->pdfAxis);
+    return fmax(0.0f, cosine / M_PI_F);
+}
+
+/** The surface's own scattering density for a direction it was handed. */
+inline float scattering_pdf(int materialType, float3 normal, float3 scattered) {
+    if (materialType == 4) return 1.0f / (4.0f * M_PI_F);          // Isotropic
+    float cosine = dot(normal, scattered / length(scattered));
+    return cosine < 0.0f ? 0.0f : cosine / M_PI_F;                 // Lambertian
 }
 
 inline bool scatter(__global const int* matI, __global const float* matF,
@@ -505,38 +554,44 @@ inline bool scatter(__global const int* matI, __global const float* matF,
                     __global const uchar* images,
                     __global const float* perlinVectors, __global const int* perlinPermutations,
                     const HitRecord* rec, float3 inDirection, Rng* rng,
-                    float3* attenuation, float3* scattered) {
+                    ScatterRec* srec) {
     int type = matI[rec->material * 2];
     int texture = matI[rec->material * 2 + 1];
+
+    srec->skipPdf = false;
+    srec->pdfKind = PDF_COSINE;
+    srec->pdfAxis = rec->normal;
 
     if (type == 3) return false;                          // DiffuseLight: the path ends here
 
     if (type == 4) {                                      // Isotropic: fog scatters anywhere
-        *attenuation = texture_value(texI, texF, images, perlinVectors, perlinPermutations,
-                                     texture, rec->u, rec->v, rec->point);
-        *scattered = random_unit_vector(rng);
+        srec->attenuation = texture_value(texI, texF, images, perlinVectors, perlinPermutations,
+                                          texture, rec->u, rec->v, rec->point);
+        srec->direction = random_unit_vector(rng);
+        srec->pdfKind = PDF_SPHERE;
         return true;
     }
 
-    if (type == 0) {                                      // Lambertian
-        float3 direction = random_on_hemisphere(rng, rec->normal);
-        if (near_zero(direction)) direction = rec->normal;
-        *attenuation = texture_value(texI, texF, images, perlinVectors, perlinPermutations,
-                                     texture, rec->u, rec->v, rec->point);
-        *scattered = direction;
+    if (type == 0) {                                      // Lambertian, sampled by cosine
+        float3 u, v, w;
+        onb_build(rec->normal, &u, &v, &w);
+        float3 sampled = random_cosine_direction(rng);   // "local" is a keyword in OpenCL C
+        srec->attenuation = texture_value(texI, texF, images, perlinVectors, perlinPermutations,
+                                          texture, rec->u, rec->v, rec->point);
+        srec->direction = u * sampled.x + v * sampled.y + w * sampled.z;
         return true;
     }
 
     float3 unitDirection = inDirection / length(inDirection);
+    srec->skipPdf = true;                                 // specular from here on
 
     if (type == 1) {                                      // Metal
         float fuzz = matF[rec->material * 2];
         float3 reflected = unitDirection - rec->normal * (2.0f * dot(unitDirection, rec->normal));
-        float3 direction = reflected + random_in_unit_sphere(rng) * fuzz;
-        if (dot(direction, rec->normal) <= 0.0f) return false;
-        *attenuation = texture_value(texI, texF, images, perlinVectors, perlinPermutations,
-                                     texture, rec->u, rec->v, rec->point);
-        *scattered = direction;
+        reflected = reflected / length(reflected);
+        srec->attenuation = texture_value(texI, texF, images, perlinVectors, perlinPermutations,
+                                          texture, rec->u, rec->v, rec->point);
+        srec->direction = reflected + random_unit_vector(rng) * fuzz;
         return true;
     }
 
@@ -550,8 +605,8 @@ inline bool scatter(__global const int* matI, __global const float* matF,
     // Short-circuit: the random draw only happens when refraction is possible, as on the CPU.
     bool useReflect = cannotRefract || (reflectance(cosTheta, refractionRatio) > rng_float(rng));
 
-    *attenuation = (float3)(1.0f, 1.0f, 1.0f);
-    *scattered = useReflect
+    srec->attenuation = (float3)(1.0f, 1.0f, 1.0f);
+    srec->direction = useReflect
         ? unitDirection - rec->normal * (2.0f * dot(unitDirection, rec->normal))
         : refract_dir(unitDirection, rec->normal, refractionRatio);
     return true;
@@ -634,15 +689,25 @@ __kernel void render(__global const float* cam,
                           origin, direction, time, 0.001f, INFINITY, &rng, &rec)) {
                 sampleColor += throughput * material_emitted(matI, texI, texF, images,
                                                              perlinVectors, perlinPermutations, &rec);
-                float3 attenuation;
-                float3 scattered;
+                ScatterRec srec;
                 if (!scatter(matI, matF, texI, texF, images, perlinVectors, perlinPermutations,
-                             &rec, direction, &rng, &attenuation, &scattered)) {
+                             &rec, direction, &rng, &srec)) {
                     break;
                 }
-                throughput *= attenuation;
+
+                if (srec.skipPdf) {
+                    throughput *= srec.attenuation;
+                } else {
+                    // Sample from the density, then weigh the sample by how much the surface
+                    // actually scatters that way - that division is what keeps it unbiased.
+                    float density = scatter_pdf_value(&srec, srec.direction);
+                    if (density < 1e-8f) break;
+                    float surface = scattering_pdf(matI[rec.material * 2], rec.normal, srec.direction);
+                    throughput *= srec.attenuation * (surface / density);
+                }
+
                 origin = rec.point;
-                direction = scattered;
+                direction = srec.direction;
             } else {
                 float3 escaped = background;
                 if (!flatBackground) {

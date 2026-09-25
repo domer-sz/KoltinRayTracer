@@ -73,6 +73,35 @@ open class Vector(val x: Float, val y: Float, val z: Float) {
             }
         }
 
+        /**
+         * A direction around +z, weighted by cosine: the distribution a diffuse surface
+         * actually scatters with, so the renderer spends samples where they matter.
+         */
+        @JvmStatic
+        fun randomCosineDirection(): Vector {
+            val r1 = randomFloat(0.0f, 1.0f)
+            val r2 = randomFloat(0.0f, 1.0f)
+            val phi = 2.0f * rayTraceTypescript.utils.pi * r1
+            val root = kotlin.math.sqrt(r2)
+            return Vector(
+                kotlin.math.cos(phi) * root,
+                kotlin.math.sin(phi) * root,
+                kotlin.math.sqrt(1.0f - r2)
+            )
+        }
+
+        /** A direction towards a sphere of [radius] whose centre is [distanceSquared] away. */
+        @JvmStatic
+        fun randomToSphere(radius: Float, distanceSquared: Float): Vector {
+            val r1 = randomFloat(0.0f, 1.0f)
+            val r2 = randomFloat(0.0f, 1.0f)
+            val z = 1.0f + r2 * (kotlin.math.sqrt(1.0f - radius * radius / distanceSquared) - 1.0f)
+
+            val phi = 2.0f * rayTraceTypescript.utils.pi * r1
+            val root = kotlin.math.sqrt(1.0f - z * z)
+            return Vector(kotlin.math.cos(phi) * root, kotlin.math.sin(phi) * root, z)
+        }
+
         /** A direction drawn evenly from the sphere of directions. */
         @JvmStatic
         fun randomUnitVector(): Vector = randomInUnitSphere().unit()
