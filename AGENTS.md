@@ -4,12 +4,29 @@
 This Maven project keeps code under `src/main/kotlin/rayTraceTypescript`, split into domain-focused packages such as `materials`, `objects`, and `utils`. The entry point is `Main.kt`, which wires up the `Camera`, scene configuration, and invokes `render`, producing `image.ppm` in the repo root. Build artifacts land in `target/`, and `pom.xml` pins Kotlin 2.2.21 plus the Exec plugin that targets `rayTraceTypescript.MainKt`. Keep any future assets (sample renders, textures) in a dedicated top-level folder so they do not pollute `target/`.
 
 ## Rendering Backends
-Ray tracing runs on the GPU through OpenCL (LWJGL bindings, kernel in `src/main/resources/kernels/raytracer.cl`). `Camera.initialize()` produces the shared `CameraSetup`, `gpu/SceneFlattener` lays the scene out as flat buffers, and the kernel does sampling, BVH traversal, materials and textures; the CPU only writes the PPM through `render/PpmWriter`. `-Drt.renderer=cpu` forces the reference CPU path (`render/CpuRenderer`), `-Drt.renderer=gpu` forces OpenCL and fails loudly, and the default `auto` falls back to the CPU when no device or driver is present. `RT_OPENCL_DEVICE=<substring>` picks a specific device by name; without it the first GPU wins. Because the GPU draws its random numbers per pixel and sample, renders match the CPU in geometry, shading and brightness but carry a different noise pattern - compare images statistically (as `GpuCpuComparisonTest` does), never byte for byte.
+Ray tracing runs on the GPU through OpenCL (LWJGL bindings, kernel in `src/main/resources/kernels/raytracer.cl`). `Camera.initialize()` produces the shared `CameraSetup`, `gpu/SceneFlattener` lays the scene out as flat buffers, and the kernel does sampling, BVH traversal, materials and textures; the CPU only writes the PPM through `render/PpmWriter`. `-Drt.renderer=cpu` forces the reference CPU path (`render/CpuRenderer`), `-Drt.renderer=gpu` forces OpenCL and fails loudly, and the default `auto` falls back to the CPU when no device or driver is present. `RT_OPENCL_DEVICE=<substring>` picks a specific device by name; without it the first GPU wins. Because the GPU draws its random numbers per pixel and sample, renders match the CPU in geometry, shading and brightness but carry a different noise pattern - compare images statistically (as `GpuCpuComparisonTest` does), never byte for byte. Everything the books add is on both sides: quads, Perlin noise, emissive materials, instances, volumes and light sampling. Instances are the one place the two differ in approach - the CPU transforms rays at traversal time, the flattener folds the same rigid transform into the primitives - so that pair is worth a comparison test whenever it changes.
 
 ## Meshes and 3D File Formats
 `objects/MeshLoader` reads a model file into a `Mesh` - a flat triangle soup - picking a parser in `objects/formats` by extension: STL (binary and ASCII, told apart by file size rather than the `solid` keyword), OBJ, PLY (ASCII and both binary byte orders), OFF, glTF 2.0 (`.gltf` with external or data-URI buffers, and packed `.glb`), and 3MF. Only geometry is read; materials come from the scene. Faces with more than three corners are fanned into triangles, glTF node transforms are baked into world space, and glTF needs a JSON reader that `utils/Json` provides, because the project has no JSON dependency. `Mesh.toHittables` turns each facet into a `Triangle` - Moller-Trumbore intersection, barycentric u/v, and a normal taken from the winding rather than from the file, since mesh files frequently carry wrong ones.
 
 Model files agree on no units or origin, so `standingOnFloor()` is the default placement: the model is centred over the origin in x/z, rests on y=0 - the top of the ground sphere every scene uses - and is scaled to `DEFAULT_TARGET_HEIGHT`; pass `targetHeight = null` to keep the authored size. `BookScenes.modelWorld(path, material)` assembles that default scene (checkered ground + model) and always wraps it in a `BvhNode`. Run it with `mvn exec:java -Drt.scene=model -Drt.model=<path>`; scenes live in `scenes/BookScenes` and are picked by name (the old `1|2|3` still work), and the path also comes from `MODEL_FILE` or `./model.stl`. Triangles get their own leaf kind in the GPU buffers (`SceneBuffers.LEAF_TRIANGLE`) and their bounding boxes are padded through `Aabb.padded()`, since a facet in an axis-aligned plane would otherwise have a box no ray can enter.
+
+## Scenes and Sampling
+Every scene from the three books lives in `scenes/BookScenes` as a named builder returning a
+`SceneDefinition`; `-Drt.scene=<name>` picks one (`cornell-final`, `final-week`, `cornell-smoke`,
+`perlin-spheres`, `quads`, …, and the old `1|2|3` still resolve). `-Drt.samples`, `-Drt.width`,
+`-Drt.depth` scale any scene from the command line, since the books quote their finales at sample
+counts that take hours, and `-Drt.out` redirects the render away from the committed `image.ppm`.
+
+Shading follows The Rest of Your Life. A material returns a `ScatterRecord`: a diffuse surface
+hands back a density to sample (`CosinePdf` around the normal, `SpherePdf` inside fog) while a
+mirror or glass hands back the single ray it sends, and the renderer divides each sample by the
+density it came from. A scene may also name `Camera.lights` - shapes worth aiming at - and then
+half of every diffuse bounce's samples go straight at a light (`MixturePdf` over `HittablePdf`
+and the surface's own density), which is what clears the noise out of a dim room; `-Drt.lights=off`
+renders the same scene without it. `Quad` and `Sphere` implement `pdfValue`/`random` for this, and
+the GPU carries the light list as bare geometry separate from the tree it traverses. Emissive
+surfaces only emit through their front face.
 
 ## Build, Test, and Development Commands
 - `mvn compile` — compiles Kotlin sources with the Kotlin Maven plugin targeting JVM 17.
@@ -17,6 +34,7 @@ Model files agree on no units or origin, so `standingOnFloor()` is the default p
 - `mvn exec:java` — runs `MainKt`, generating/overwriting `image.ppm`; commit only curated outputs.
 - `mvn test` or `mvn -Dtest=CameraTest test` — executes unit tests (add them under `src/test/kotlin`).
 - `GpuCpuComparisonTest` needs an OpenCL device and skips itself without one; `pocl-opencl-icd` provides a CPU device for machines with no GPU.
+- `UPDATE_REFERENCE_IMAGE=1 mvn test -Dtest=ImageRegressionTest` rewrites the golden image. Do it only when a change is meant to alter the render, and say so in the commit - the test compares against the old reference in the same run, so it fails once while rewriting and passes on the next run.
 
 ## Coding Style & Naming Conventions
 Follow idiomatic Kotlin style: 4-space indentation, `UpperCamelCase` for classes such as `HittableList`, `lowerCamelCase` for functions/properties, and `SCREAMING_SNAKE_CASE` only for constants. Keep packages under `rayTraceTypescript.*` to mirror directories. Favor `val` over `var`, keep mutable lists encapsulated (as in `HittableList`), and document non-obvious math near vector or material logic. Reuse helper extensions (e.g., `Vector.minus`) instead of ad-hoc calculations to preserve consistency.
