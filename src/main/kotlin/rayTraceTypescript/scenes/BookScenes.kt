@@ -42,6 +42,7 @@ object BookScenes {
         "cornell-smoke" to { cornellSmoke() },
         "final-week" to { finalWeek() },
         "cornell-final" to { cornellFinal() },
+        "showcase" to { showcase() },
         "model" to { model() }
     )
 
@@ -355,6 +356,68 @@ object BookScenes {
             name = "cornell-final",
             world = scene.world,
             camera = scene.camera.apply { this.lights = lights }
+        )
+    }
+
+    /**
+     * Not from the books: one widescreen room holding what the two books added - quads, a
+     * marble sphere built from Perlin turbulence, glass, a block of fog and a metal block both
+     * spun into place - lit by a quad the renderer aims its samples at.
+     *
+     * The floor is a huge sphere rather than a quad on purpose: a checkered plane lying exactly
+     * on a cell boundary leaves the pattern's parity to the last bit of the hit point.
+     */
+    fun showcase(samples: Int = 500, width: Int = 800): SceneDefinition {
+        val white = Lambertian(Color(0.73f, 0.73f, 0.73f))
+        val lamp = Quad(
+            Point(-2.2f, 5.4f, -2.2f), Vector(4.4f, 0f, 0f), Vector(0f, 0f, 4.4f),
+            DiffuseLight(Color(6f, 6f, 6f))
+        )
+
+        val fogBlock = ConstantMedium(
+            Translate(
+                RotateY(box(Point(0f, 0f, 0f), Point(1.5f, 2.6f, 1.5f), white), 22.0f),
+                Vector(-3.4f, 0.01f, -0.6f)
+            ),
+            0.9f,
+            Color(0.85f, 0.87f, 0.95f)
+        )
+        val metalBlock = Translate(
+            RotateY(box(Point(0f, 0f, 0f), Point(1.4f, 1.4f, 1.4f), Metal(Color(0.8f, 0.75f, 0.55f), 0.05f)), -17.0f),
+            Vector(2.4f, 0.01f, -1.2f)
+        )
+
+        return SceneDefinition(
+            name = "showcase",
+            world = HittableList(
+                mutableListOf(
+                    Sphere(
+                        Point(0f, -1000f, 0f), 1000f,
+                        Lambertian(CheckerTexture(0.7f, Color(0.16f, 0.25f, 0.12f), Color(0.86f, 0.86f, 0.82f)))
+                    ),
+                    Quad(Point(-7f, 0f, -4.2f), Vector(14f, 0f, 0f), Vector(0f, 6.5f, 0f), white),
+                    Sphere(Point(-1.1f, 1.15f, 0.9f), 1.15f, Lambertian(NoiseTexture(2.6f))),
+                    Sphere(Point(1.5f, 1.0f, 1.6f), 1.0f, Dielectric(1.5f)),
+                    Sphere(Point(-3.3f, 0.55f, 1.9f), 0.55f, Lambertian(Color(0.75f, 0.3f, 0.2f))),
+                    fogBlock,
+                    metalBlock,
+                    lamp
+                )
+            ),
+            camera = Camera().apply {
+                aspectRatio = 16.0f / 9.0f
+                imageWidth = width
+                samplesPerPixel = samples
+                maxReflectionDepth = 30
+                background = Color(0.02f, 0.02f, 0.03f)
+                vfov = 32.0f
+                lookFrom = Point(0.6f, 3.2f, 9.5f)
+                lookAt = Point(-0.2f, 1.3f, 0f)
+                vUp = Vector(0f, 1f, 0f)
+                defocusAngle = 0.3f
+                focusDistance = 9.0f
+                lights = lamp
+            }
         )
     }
 
