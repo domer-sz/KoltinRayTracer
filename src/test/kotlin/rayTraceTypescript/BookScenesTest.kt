@@ -9,8 +9,8 @@ import rayTraceTypescript.scenes.BookScenes
 
 class BookScenesTest {
 
-    /** The model scene wants a file on disk; every other scene has to stand on its own. */
-    private val selfContained = BookScenes.names.filterNot { it == "model" }
+    /** The model scenes want a file on disk; every other scene has to stand on its own. */
+    private val selfContained = BookScenes.names.filterNot { it == "model" || it == "cornell-model" }
 
     @Test
     fun `every scene builds and flattens for the gpu`() {
