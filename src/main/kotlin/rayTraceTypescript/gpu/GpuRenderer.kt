@@ -104,37 +104,53 @@ class GpuRenderer : Renderer {
                 }
                 clSetKernelArg1i(kernel, arg++, setup.imageWidth)
                 clSetKernelArg1i(kernel, arg++, setup.imageHeight)
-                val rowOffsetArg = arg++
-                clSetKernelArg1i(kernel, rowOffsetArg, 0)
-                clSetKernelArg1i(kernel, arg++, setup.samplesPerPixel)
+                val sampleStartArg = arg++
+                val sampleCountArg = arg++
                 clSetKernelArg1i(kernel, arg++, setup.maxReflectionDepth)
                 clSetKernelArg1f(kernel, arg++, setup.pixelSamplesScale)
                 clSetKernelArg1i(kernel, arg++, scene.rootNode)
                 clSetKernelArg1i(kernel, arg++, scene.lightCount)
                 clSetKernelArg1l(kernel, arg, seed())
 
-                val progress = ProgressBar(setup.totalPixels)
+                val progress = ProgressBar(PROGRESS_STEPS)
                 val kernelStart = System.nanoTime()
+                var launches = 0
                 MemoryStack.stackPush().use { stack ->
+                    // One work item per pixel, a warp's 32 covering an 8x4 tile: neighbouring
+                    // rays stay together on their first bounces, where they diverge least.
+                    val tiles = ((setup.imageWidth + 7) / 8).toLong() * ((setup.imageHeight + 3) / 4)
+                    val localSize = (System.getProperty("rt.cl.local")?.toLongOrNull() ?: LOCAL_SIZE)
                     val globalWorkSize = stack.mallocPointer(1)
-                    var row = 0
-                    while (row < setup.imageHeight) {
-                        val rows = minOf(ROWS_PER_BATCH, setup.imageHeight - row)
-                        clSetKernelArg1i(kernel, rowOffsetArg, row)
-                        globalWorkSize.put(0, (setup.imageWidth.toLong() * rows))
+                        .put(0, (tiles * 32 + localSize - 1) / localSize * localSize)
+                    val localWorkSize = stack.mallocPointer(1).put(0, localSize)
+
+                    // Every launch covers the whole image and a slice of the samples, sized to
+                    // take about TARGET_LAUNCH_MS: plenty of threads to keep every SM full, and
+                    // short enough for the display driver's watchdog. The random streams are
+                    // keyed by pixel and sample, so the slicing does not change the image.
+                    var done = 0
+                    var slice = 1
+                    while (done < setup.samplesPerPixel) {
+                        val count = minOf(slice, setup.samplesPerPixel - done)
+                        clSetKernelArg1i(kernel, sampleStartArg, done)
+                        clSetKernelArg1i(kernel, sampleCountArg, count)
+                        val launchStart = System.nanoTime()
                         OpenClContext.check(
-                            clEnqueueNDRangeKernel(cl.queue, kernel, 1, null, globalWorkSize, null, null, null),
+                            clEnqueueNDRangeKernel(cl.queue, kernel, 1, null, globalWorkSize, localWorkSize, null, null),
                             "clEnqueueNDRangeKernel"
                         )
                         OpenClContext.check(clFinish(cl.queue), "clFinish")
-                        row += rows
-                        progress.report(row * setup.imageWidth)
+                        val launchMs = maxOf((System.nanoTime() - launchStart) / 1_000_000.0, 1.0)
+                        done += count
+                        launches++
+                        slice = (count * TARGET_LAUNCH_MS / launchMs).toInt().coerceIn(1, count * 4)
+                        progress.report((done.toLong() * PROGRESS_STEPS / setup.samplesPerPixel).toInt())
                     }
                 }
                 val kernelMs = (System.nanoTime() - kernelStart) / 1_000_000
                 // Kept apart so the kernel's own speed is not buried under scene preparation.
                 System.err.println(
-                    "\n[gpu] flatten $flattenMs ms, build $buildMs ms, kernel $kernelMs ms " +
+                    "\n[gpu] flatten $flattenMs ms, build $buildMs ms, kernel $kernelMs ms in $launches launches " +
                         "(${scene.nodeCount} nodes, depth ${scene.maxDepth})"
                 )
 
@@ -184,7 +200,9 @@ class GpuRenderer : Renderer {
     )
 
     companion object {
-        private const val ROWS_PER_BATCH = 128
+        private const val TARGET_LAUNCH_MS = 200.0
+        private const val LOCAL_SIZE = 64L
+        private const val PROGRESS_STEPS = 1000
         // No fast-math: it would change shading brightness and break the nearZero/infinity checks.
         private const val BUILD_OPTIONS = "-cl-std=CL1.2"
         private const val KERNEL_RESOURCE = "/kernels/raytracer.cl"

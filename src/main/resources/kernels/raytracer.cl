@@ -853,17 +853,21 @@ __kernel void render(__global const float* cam,
                      __global float* out,
                      const int width,
                      const int height,
-                     const int rowOffset,
-                     const int samplesPerPixel,
+                     const int sampleStart,
+                     const int sampleCount,
                      const int maxReflectionDepth,
                      const float pixelSamplesScale,
                      const int rootNode,
                      const int lightCount,
                      const ulong seed) {
+    // Work items come in warps of 32, each covering an 8x4 tile of pixels.
     int gid = get_global_id(0);
-    int x = gid % width;
-    int y = rowOffset + gid / width;
-    if (y >= height) return;
+    int tile = gid >> 5;
+    int lane = gid & 31;
+    int tilesX = (width + 7) >> 3;
+    int x = (tile % tilesX) * 8 + (lane & 7);
+    int y = (tile / tilesX) * 4 + (lane >> 3);
+    if (x >= width || y >= height) return;
 
     Scene scene;
     scene.nodes = nodes;
@@ -890,7 +894,7 @@ __kernel void render(__global const float* cam,
 
     float3 pixelColor = (float3)(0.0f, 0.0f, 0.0f);
 
-    for (int sample = 0; sample < samplesPerPixel; sample++) {
+    for (int sample = sampleStart; sample < sampleStart + sampleCount; sample++) {
         Rng rng;
         rng_init(&rng, seed, (ulong)(y * width + x), (ulong)sample);
 
@@ -978,7 +982,9 @@ __kernel void render(__global const float* cam,
 
     pixelColor *= pixelSamplesScale;
 
+    // The first slice of samples writes the pixel, later slices add to it.
     int base = (y * width + x) * 3;
+    if (sampleStart > 0) pixelColor += (float3)(out[base], out[base + 1], out[base + 2]);
     out[base]     = pixelColor.x;
     out[base + 1] = pixelColor.y;
     out[base + 2] = pixelColor.z;
