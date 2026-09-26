@@ -159,79 +159,6 @@ typedef struct {
     bool frontFace;
 } HitRecord;
 
-
-// Full hit records, for sampling the lights: few shapes, tested one by one.
-inline bool sphere_hit(__global const float* spheres, __global const int* sphereMaterials, int index,
-                       float3 origin, float3 direction, float time, float tMin, float tMax,
-                       HitRecord* rec) {
-    __global const float* s = spheres + index * 8;
-    float3 center = (float3)(s[0], s[1], s[2]);
-    if (HAS_MOTION) center += time * (float3)(s[3], s[4], s[5]);
-    float radius = s[6];
-
-    float3 oc = origin - center;
-    float a = dot(direction, direction);
-    float h = dot(direction, -oc);
-    float c = dot(oc, oc) - radius * radius;
-    float discriminant = h * h - a * c;
-    if (discriminant < 0.0f) return false;
-
-    float sqrtd = sqrt(discriminant);
-    float root = (h - sqrtd) / a;
-    if (!(root > tMin && root < tMax)) {
-        root = (h + sqrtd) / a;
-        if (!(root > tMin && root < tMax)) return false;
-    }
-
-    float3 hitpoint = origin + root * direction;
-    float3 outwardNormal = (hitpoint - center) / radius;
-
-    rec->point = hitpoint;
-    rec->t = root;
-    // The texture coordinates cost an acos and an atan2, so they are left for the closest
-    // hit only (sphere_uv); a negative u marks them as still owed.
-    rec->u = -1.0f;
-    rec->v = 0.0f;
-    rec->material = sphereMaterials[index];
-    rec->frontFace = dot(direction, outwardNormal) < 0.0f;
-    rec->normal = rec->frontFace ? outwardNormal : -outwardNormal;
-    return true;
-}
-
-// Quad.hit: intersect the plane, then express the hit in the quad's own u/v basis.
-inline bool quad_hit(__global const float* quads, __global const int* quadMaterials, int index,
-                     float3 origin, float3 direction, float tMin, float tMax, HitRecord* rec) {
-    __global const float* data = quads + index * 16;
-    float3 Q = (float3)(data[0], data[1], data[2]);
-    float3 u = (float3)(data[3], data[4], data[5]);
-    float3 v = (float3)(data[6], data[7], data[8]);
-    float3 w = (float3)(data[9], data[10], data[11]);
-    float3 normal = (float3)(data[12], data[13], data[14]);
-    float D = data[15];
-
-    float denominator = dot(normal, direction);
-    if (fabs(denominator) < TRIANGLE_PARALLEL_EPSILON) return false;
-
-    float t = (D - dot(normal, origin)) / denominator;
-    if (!(t >= tMin && t <= tMax)) return false;
-
-    float3 intersection = origin + t * direction;
-    float3 planarHit = intersection - Q;
-    float alpha = dot(w, cross(planarHit, v));
-    float beta = dot(w, cross(u, planarHit));
-    if (alpha < 0.0f || alpha > 1.0f || beta < 0.0f || beta > 1.0f) return false;
-
-    rec->point = intersection;
-    rec->t = t;
-    rec->u = alpha;
-    rec->v = beta;
-    rec->material = quadMaterials[index];
-    rec->frontFace = dot(direction, normal) < 0.0f;
-    rec->normal = rec->frontFace ? normal : -normal;
-    return true;
-}
-
-
 // ---------------------------------------------------------------- scene traversal
 
 // Everything a traversal reads, gathered so the helpers below take one argument, not eleven.
@@ -790,9 +717,7 @@ inline float3 light_random(__global const float* quads, __global const float* sp
 }
 
 /** How likely that direction was, averaged over the lights - Hittable.pdfValue in the kernel. */
-inline float light_pdf_value(__global const float* quads, __global const int* quadMaterials,
-                             __global const float* spheres, __global const int* sphereMaterials,
-                             __global const int* lights, int lightCount,
+inline float light_pdf_value(const Scene* sc, __global const int* lights, int lightCount,
                              float3 origin, float3 direction) {
     float weight = 1.0f / (float)lightCount;
     float sum = 0.0f;
@@ -800,22 +725,24 @@ inline float light_pdf_value(__global const float* quads, __global const int* qu
     for (int i = 0; i < lightCount; i++) {
         int kind = lights[i * 2];
         int index = lights[i * 2 + 1];
-        HitRecord rec;
+        float t, u, v;
 
         if (kind == LEAF_QUAD) {
-            if (!quad_hit(quads, quadMaterials, index, origin, direction, 0.001f, INFINITY, &rec)) continue;
-            __global const float* data = quads + index * 16;
-            float3 u = (float3)(data[3], data[4], data[5]);
-            float3 v = (float3)(data[6], data[7], data[8]);
-            float area = length(cross(u, v));
+            if (!quad_t(sc, index, origin, direction, 0.001f, INFINITY, &t, &u, &v)) continue;
+            __global const float* data = sc->quads + index * 16;
+            float3 normal = (float3)(data[12], data[13], data[14]);
+            float3 edgeU = (float3)(data[3], data[4], data[5]);
+            float3 edgeV = (float3)(data[6], data[7], data[8]);
+            float area = length(cross(edgeU, edgeV));
 
-            float distanceSquared = rec.t * rec.t * dot(direction, direction);
-            float cosine = fabs(dot(direction, rec.normal) / length(direction));
+            float distanceSquared = t * t * dot(direction, direction);
+            // Which side the ray arrives from does not matter here: the cosine is taken absolute.
+            float cosine = fabs(dot(direction, normal) / length(direction));
             if (cosine < TRIANGLE_PARALLEL_EPSILON) continue;
             sum += weight * distanceSquared / (cosine * area);
         } else {
-            if (!sphere_hit(spheres, sphereMaterials, index, origin, direction, 0.0f, 0.001f, INFINITY, &rec)) continue;
-            __global const float* data = spheres + index * 8;
+            if (!sphere_t(sc, index, origin, direction, 0.0f, 0.001f, INFINITY, &t)) continue;
+            __global const float* data = sc->spheres + index * 8;
             float3 centre = (float3)(data[0], data[1], data[2]);
             float radius = data[6];
             float3 toCentre = centre - origin;
@@ -942,8 +869,7 @@ __kernel void render(__global const float* restrict cam,
 
                     float density = scatter_pdf_value(&srec, chosen);
                     if (HAS_LIGHTS && lightCount > 0) {
-                        density = 0.5f * density + 0.5f * light_pdf_value(quads, quadMaterials,
-                            spheres, sphereMaterials, lights, lightCount, rec.point, chosen);
+                        density = 0.5f * density + 0.5f * light_pdf_value(&scene, lights, lightCount, rec.point, chosen);
                     }
                     if (density < 1e-8f) break;
 
