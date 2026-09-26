@@ -2,7 +2,7 @@ package rayTraceTypescript.gpu
 
 import org.lwjgl.opencl.CL10.CL_MEM_COPY_HOST_PTR
 import org.lwjgl.opencl.CL10.CL_MEM_READ_ONLY
-import org.lwjgl.opencl.CL10.CL_MEM_WRITE_ONLY
+import org.lwjgl.opencl.CL10.CL_MEM_READ_WRITE
 import org.lwjgl.opencl.CL10.clCreateBuffer
 import org.lwjgl.opencl.CL10.clCreateKernel
 import org.lwjgl.opencl.CL10.clEnqueueNDRangeKernel
@@ -84,7 +84,8 @@ class GpuRenderer : Renderer {
                     val errcode = stack.mallocInt(1)
                     val handle = clCreateBuffer(
                         cl.context,
-                        CL_MEM_WRITE_ONLY.toLong(),
+                        // Read as well as written: every slice of samples after the first adds to it.
+                        CL_MEM_READ_WRITE.toLong(),
                         pixels.size.toLong() * Float.SIZE_BYTES,
                         errcode
                     )

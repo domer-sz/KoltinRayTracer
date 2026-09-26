@@ -826,7 +826,9 @@ __kernel void render(__global const float* restrict cam,
     // warp keep running the same bounce code instead of some idling while others start anew.
     // Each sample still draws the same random numbers in the same order.
     int sample = sampleStart;
-    int sampleEnd = sampleStart + sampleCount;
+    // With no bounces allowed every path is black, as on the CPU; the loop below would
+    // otherwise trace one bounce before checking.
+    int sampleEnd = maxReflectionDepth > 0 ? sampleStart + sampleCount : sample;
     bool fresh = true;
     Rng rng;
     float3 origin, direction, throughput, sampleColor;
