@@ -236,17 +236,17 @@ inline bool quad_hit(__global const float* quads, __global const int* quadMateri
 
 // Everything a traversal reads, gathered so the helpers below take one argument, not eleven.
 typedef struct {
-    __global const float4* nodes;        // 4 float4 per inner node, as BvhBuilder lays them out
-    __global const int2* leaves;         // first ref, count
-    __global const int2* refs;           // kind, index
-    __global const float* spheres;
-    __global const int* sphereMaterials;
-    __global const float4* triangles;    // v0, edge1, edge2
-    __global const int* triangleMaterials;
-    __global const float* quads;
-    __global const int* quadMaterials;
-    __global const int* mediumInts;
-    __global const float* mediumFloats;
+    __global const float4* restrict nodes;        // 4 float4 per inner node, as BvhBuilder lays them out
+    __global const int2* restrict leaves;         // first ref, count
+    __global const int2* restrict refs;           // kind, index
+    __global const float* restrict spheres;
+    __global const int* restrict sphereMaterials;
+    __global const float4* restrict triangles;    // v0, edge1, edge2
+    __global const int* restrict triangleMaterials;
+    __global const float* restrict quads;
+    __global const int* restrict quadMaterials;
+    __global const int* restrict mediumInts;
+    __global const float* restrict mediumFloats;
 } Scene;
 
 // The closest hit found so far. Only what the search itself needs: normals, points and texture
@@ -830,26 +830,26 @@ inline float light_pdf_value(__global const float* quads, __global const int* qu
 
 // ---------------------------------------------------------------- entry point
 
-__kernel void render(__global const float* cam,
-                     __global const float4* nodes,
-                     __global const int2* leaves,
-                     __global const int2* refs,
-                     __global const float* spheres,
-                     __global const int* sphereMaterials,
-                     __global const float4* triangles,
-                     __global const int* triangleMaterials,
-                     __global const float* quads,
-                     __global const int* quadMaterials,
-                     __global const int* mediumInts,
-                     __global const float* mediumFloats,
-                     __global const int* lights,
-                     __global const int* matI,
-                     __global const float* matF,
-                     __global const int* texI,
-                     __global const float* texF,
-                     __global const uchar* images,
-                     __global const float* perlinVectors,
-                     __global const int* perlinPermutations,
+__kernel void render(__global const float* restrict cam,
+                     __global const float4* restrict nodes,
+                     __global const int2* restrict leaves,
+                     __global const int2* restrict refs,
+                     __global const float* restrict spheres,
+                     __global const int* restrict sphereMaterials,
+                     __global const float4* restrict triangles,
+                     __global const int* restrict triangleMaterials,
+                     __global const float* restrict quads,
+                     __global const int* restrict quadMaterials,
+                     __global const int* restrict mediumInts,
+                     __global const float* restrict mediumFloats,
+                     __global const int* restrict lights,
+                     __global const int* restrict matI,
+                     __global const float* restrict matF,
+                     __global const int* restrict texI,
+                     __global const float* restrict texF,
+                     __global const uchar* restrict images,
+                     __global const float* restrict perlinVectors,
+                     __global const int* restrict perlinPermutations,
                      __global float* out,
                      const int width,
                      const int height,
