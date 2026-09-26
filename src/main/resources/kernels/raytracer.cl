@@ -8,7 +8,6 @@
 #define LEAF_MEDIUM   (-4)
 #define TRIANGLE_PARALLEL_EPSILON 1e-8f
 #define STACK_SIZE    64
-#define BOUNDARY_STACK_SIZE 32
 #define REJECTION_CAP 64
 #define RR_MIN_DEPTH  5
 
@@ -118,31 +117,8 @@ typedef struct {
     bool frontFace;
 } HitRecord;
 
-inline bool aabb_hit(__global const float* nodeBounds, int node, float3 origin, float3 direction,
-                     float tMin, float tMax) {
-    __global const float* box = nodeBounds + node * 6;
-    float o[3] = { origin.x, origin.y, origin.z };
-    float d[3] = { direction.x, direction.y, direction.z };
 
-    for (int axis = 0; axis < 3; axis++) {
-        float invD = 1.0f / d[axis];
-        float t0 = (box[axis] - o[axis]) * invD;
-        float t1 = (box[axis + 3] - o[axis]) * invD;
-
-        if (t0 > t1) {
-            float tmp = t0;
-            t0 = t1;
-            t1 = tmp;
-        }
-        if (t0 > tMin) tMin = t0;
-        if (t1 < tMax) tMax = t1;
-        // Strict, for the reason Aabb.hit spells out: a padded flat box far from the origin
-        // has both slab crossings round to the same float.
-        if (tMax < tMin) return false;
-    }
-    return true;
-}
-
+// Full hit records, for sampling the lights: few shapes, tested one by one.
 inline bool sphere_hit(__global const float* spheres, __global const int* sphereMaterials, int index,
                        float3 origin, float3 direction, float time, float tMin, float tMax,
                        HitRecord* rec) {
@@ -174,44 +150,6 @@ inline bool sphere_hit(__global const float* spheres, __global const int* sphere
     rec->u = -1.0f;
     rec->v = 0.0f;
     rec->material = sphereMaterials[index];
-    rec->frontFace = dot(direction, outwardNormal) < 0.0f;
-    rec->normal = rec->frontFace ? outwardNormal : -outwardNormal;
-    return true;
-}
-
-// Triangle.hit: Moller-Trumbore, with the barycentric coordinates reported as u/v.
-inline bool triangle_hit(__global const float* triangles, __global const int* triangleMaterials, int index,
-                         float3 origin, float3 direction, float tMin, float tMax,
-                         HitRecord* rec) {
-    __global const float* t = triangles + index * 12;
-    float3 v0 = (float3)(t[0], t[1], t[2]);
-    float3 edge1 = (float3)(t[3], t[4], t[5]);
-    float3 edge2 = (float3)(t[6], t[7], t[8]);
-
-    float3 pvec = cross(direction, edge2);
-    float determinant = dot(edge1, pvec);
-    if (fabs(determinant) < TRIANGLE_PARALLEL_EPSILON) return false;
-
-    float inverseDeterminant = 1.0f / determinant;
-    float3 tvec = origin - v0;
-    float u = dot(tvec, pvec) * inverseDeterminant;
-    if (u < 0.0f || u > 1.0f) return false;
-
-    float3 qvec = cross(tvec, edge1);
-    float v = dot(direction, qvec) * inverseDeterminant;
-    if (v < 0.0f || u + v > 1.0f) return false;
-
-    float root = dot(edge2, qvec) * inverseDeterminant;
-    if (!(root > tMin && root < tMax)) return false;
-
-    float3 outwardNormal = cross(edge1, edge2);
-    outwardNormal = outwardNormal / length(outwardNormal);
-
-    rec->point = origin + root * direction;
-    rec->t = root;
-    rec->u = u;
-    rec->v = v;
-    rec->material = triangleMaterials[index];
     rec->frontFace = dot(direction, outwardNormal) < 0.0f;
     rec->normal = rec->frontFace ? outwardNormal : -outwardNormal;
     return true;
@@ -250,87 +188,210 @@ inline bool quad_hit(__global const float* quads, __global const int* quadMateri
     return true;
 }
 
-// Dispatch for the plain primitives; volumes are handled separately because they need
-// their own traversal and a random number.
-inline bool primitive_hit(__global const float* spheres, __global const int* sphereMaterials,
-                          __global const float* triangles, __global const int* triangleMaterials,
-                          __global const float* quads, __global const int* quadMaterials,
-                          int kind, int index, float3 origin, float3 direction, float time,
-                          float tMin, float tMax, HitRecord* rec) {
-    if (kind == LEAF_SPHERE) {
-        return sphere_hit(spheres, sphereMaterials, index, origin, direction, time, tMin, tMax, rec);
+
+// ---------------------------------------------------------------- scene traversal
+
+// Everything a traversal reads, gathered so the helpers below take one argument, not eleven.
+typedef struct {
+    __global const float4* nodes;        // 4 float4 per inner node, as BvhBuilder lays them out
+    __global const int2* leaves;         // first ref, count
+    __global const int2* refs;           // kind, index
+    __global const float* spheres;
+    __global const int* sphereMaterials;
+    __global const float4* triangles;    // v0, edge1, edge2
+    __global const int* triangleMaterials;
+    __global const float* quads;
+    __global const int* quadMaterials;
+    __global const int* mediumInts;
+    __global const float* mediumFloats;
+} Scene;
+
+// The closest hit found so far. Only what the search itself needs: normals, points and texture
+// coordinates are worked out once, for the winner (finish_hit).
+typedef struct {
+    float t;
+    float u;
+    float v;
+    int kind;                            // 0 while nothing has been hit
+    int index;
+} Closest;
+
+inline bool sphere_t(const Scene* sc, int index, float3 origin, float3 direction, float time,
+                     float tMin, float tMax, float* tOut) {
+    __global const float* s = sc->spheres + index * 8;
+    float3 center = (float3)(s[0], s[1], s[2]) + time * (float3)(s[3], s[4], s[5]);
+    float radius = s[6];
+
+    float3 oc = origin - center;
+    float a = dot(direction, direction);
+    float h = dot(direction, -oc);
+    float c = dot(oc, oc) - radius * radius;
+    float discriminant = h * h - a * c;
+    if (discriminant < 0.0f) return false;
+
+    float sqrtd = sqrt(discriminant);
+    float root = (h - sqrtd) / a;
+    if (!(root > tMin && root < tMax)) {
+        root = (h + sqrtd) / a;
+        if (!(root > tMin && root < tMax)) return false;
     }
-    if (kind == LEAF_TRIANGLE) {
-        return triangle_hit(triangles, triangleMaterials, index, origin, direction, tMin, tMax, rec);
-    }
-    if (kind == LEAF_QUAD) {
-        return quad_hit(quads, quadMaterials, index, origin, direction, tMin, tMax, rec);
-    }
-    return false;
+    *tOut = root;
+    return true;
 }
 
-// Traversal of a volume's boundary. Separate from world_hit because OpenCL has no recursion
-// and a medium's boundary is plain geometry - it can never contain another volume.
-inline bool boundary_hit(__global const float* nodeBounds, __global const int* nodeLinks,
-                         __global const float* spheres, __global const int* sphereMaterials,
-                         __global const float* triangles, __global const int* triangleMaterials,
-                         __global const float* quads, __global const int* quadMaterials,
-                         int rootNode, float3 origin, float3 direction, float time,
-                         float tMin, float tMax, HitRecord* rec) {
-    int stack[BOUNDARY_STACK_SIZE];
-    int sp = 0;
-    stack[sp++] = rootNode;
+// Triangle.hit: Moller-Trumbore, with the barycentric coordinates reported as u/v.
+inline bool triangle_t(const Scene* sc, int index, float3 origin, float3 direction,
+                       float tMin, float tMax, float* tOut, float* uOut, float* vOut) {
+    __global const float4* t = sc->triangles + index * 3;
+    float3 v0 = t[0].xyz;
+    float3 edge1 = t[1].xyz;
+    float3 edge2 = t[2].xyz;
 
-    bool hitAnything = false;
-    float closest = tMax;
+    float3 pvec = cross(direction, edge2);
+    float determinant = dot(edge1, pvec);
+    if (fabs(determinant) < TRIANGLE_PARALLEL_EPSILON) return false;
 
-    while (sp > 0) {
-        int node = stack[--sp];
-        if (!aabb_hit(nodeBounds, node, origin, direction, tMin, closest)) continue;
+    float inverseDeterminant = 1.0f / determinant;
+    float3 tvec = origin - v0;
+    float u = dot(tvec, pvec) * inverseDeterminant;
+    if (u < 0.0f || u > 1.0f) return false;
 
-        int first = nodeLinks[node * 2];
-        int second = nodeLinks[node * 2 + 1];
+    float3 qvec = cross(tvec, edge1);
+    float v = dot(direction, qvec) * inverseDeterminant;
+    if (v < 0.0f || u + v > 1.0f) return false;
 
-        if (second < 0) {
-            HitRecord candidate;
-            if (primitive_hit(spheres, sphereMaterials, triangles, triangleMaterials, quads, quadMaterials,
-                              second, first, origin, direction, time, tMin, closest, &candidate)) {
-                hitAnything = true;
-                closest = candidate.t;
-                *rec = candidate;
-            }
-        } else if (sp + 2 <= BOUNDARY_STACK_SIZE) {
-            stack[sp++] = first;
-            stack[sp++] = second;
+    float root = dot(edge2, qvec) * inverseDeterminant;
+    if (!(root > tMin && root < tMax)) return false;
+    *tOut = root;
+    *uOut = u;
+    *vOut = v;
+    return true;
+}
+
+// Quad.hit: intersect the plane, then express the hit in the quad's own u/v basis.
+inline bool quad_t(const Scene* sc, int index, float3 origin, float3 direction,
+                   float tMin, float tMax, float* tOut, float* uOut, float* vOut) {
+    __global const float* data = sc->quads + index * 16;
+    float3 Q = (float3)(data[0], data[1], data[2]);
+    float3 u = (float3)(data[3], data[4], data[5]);
+    float3 v = (float3)(data[6], data[7], data[8]);
+    float3 w = (float3)(data[9], data[10], data[11]);
+    float3 normal = (float3)(data[12], data[13], data[14]);
+    float D = data[15];
+
+    float denominator = dot(normal, direction);
+    if (fabs(denominator) < TRIANGLE_PARALLEL_EPSILON) return false;
+
+    float t = (D - dot(normal, origin)) / denominator;
+    if (!(t >= tMin && t <= tMax)) return false;
+
+    float3 planarHit = origin + t * direction - Q;
+    float alpha = dot(w, cross(planarHit, v));
+    float beta = dot(w, cross(u, planarHit));
+    if (alpha < 0.0f || alpha > 1.0f || beta < 0.0f || beta > 1.0f) return false;
+    *tOut = t;
+    *uOut = alpha;
+    *vOut = beta;
+    return true;
+}
+
+// Tests the plain primitives of one leaf, narrowing best->t as it goes.
+inline void leaf_plain(const Scene* sc, int code, float3 origin, float3 direction, float time,
+                       float tMin, Closest* best) {
+    int2 leaf = sc->leaves[~code];
+    for (int i = leaf.x; i < leaf.x + leaf.y; i++) {
+        int2 ref = sc->refs[i];
+        float t, u = 0.0f, v = 0.0f;
+        bool hit;
+        if (ref.x == LEAF_TRIANGLE) hit = triangle_t(sc, ref.y, origin, direction, tMin, best->t, &t, &u, &v);
+        else if (ref.x == LEAF_SPHERE) hit = sphere_t(sc, ref.y, origin, direction, time, tMin, best->t, &t);
+        else if (ref.x == LEAF_QUAD) hit = quad_t(sc, ref.y, origin, direction, tMin, best->t, &t, &u, &v);
+        else hit = false;
+        if (hit) {
+            best->t = t; best->u = u; best->v = v; best->kind = ref.x; best->index = ref.y;
         }
     }
-    return hitAnything;
+}
+
+/*
+ * Closest-hit traversal. Each node holds its two children's boxes, so one 64-byte read tests
+ * both; leaves are opened on the spot, and of two inner children the nearer is taken first while
+ * the other waits on the stack. LEAF_FN is the leaf test - plain geometry, or geometry and fog.
+ *
+ * The slab test multiplies by a precomputed 1/direction. A ray parallel to a slab plane gives
+ * 0 * inf = NaN when it starts exactly on the plane; fmin/fmax return their other operand for a
+ * NaN, so such an axis simply stops constraining the interval instead of poisoning it.
+ */
+#define BVH_TRAVERSE(LEAF_FN)                                                                  \
+    {                                                                                          \
+        float3 inv = 1.0f / direction;                                                         \
+        int stack[STACK_SIZE];                                                                 \
+        int sp = 0;                                                                            \
+        int node = root;                                                                       \
+        while (true) {                                                                         \
+            __global const float4* n = sc->nodes + node * 4;                                   \
+            float4 n0 = n[0];                                                                  \
+            float4 n1 = n[1];                                                                  \
+            float4 n2 = n[2];                                                                  \
+            int2 codes = as_int2(n[3].xy);                                                     \
+            float aLoX = (n0.x - origin.x) * inv.x, aHiX = (n0.y - origin.x) * inv.x;          \
+            float aLoY = (n0.z - origin.y) * inv.y, aHiY = (n0.w - origin.y) * inv.y;          \
+            float aLoZ = (n2.x - origin.z) * inv.z, aHiZ = (n2.y - origin.z) * inv.z;          \
+            float bLoX = (n1.x - origin.x) * inv.x, bHiX = (n1.y - origin.x) * inv.x;          \
+            float bLoY = (n1.z - origin.y) * inv.y, bHiY = (n1.w - origin.y) * inv.y;          \
+            float bLoZ = (n2.z - origin.z) * inv.z, bHiZ = (n2.w - origin.z) * inv.z;          \
+            float aNear = fmax(fmax(fmin(aLoX, aHiX), fmin(aLoY, aHiY)), fmax(fmin(aLoZ, aHiZ), tMin)); \
+            float aFar = fmin(fmin(fmax(aLoX, aHiX), fmax(aLoY, aHiY)), fmin(fmax(aLoZ, aHiZ), best->t)); \
+            float bNear = fmax(fmax(fmin(bLoX, bHiX), fmin(bLoY, bHiY)), fmax(fmin(bLoZ, bHiZ), tMin)); \
+            float bFar = fmin(fmin(fmax(bLoX, bHiX), fmax(bLoY, bHiY)), fmin(fmax(bLoZ, bHiZ), best->t)); \
+            bool hitA = aFar >= aNear;                                                         \
+            bool hitB = bFar >= bNear;                                                         \
+            if (hitA && codes.x < 0) { LEAF_FN(codes.x); hitA = false; }                        \
+            if (hitB && bNear > best->t) hitB = false;                                         \
+            if (hitB && codes.y < 0) { LEAF_FN(codes.y); hitB = false; }                        \
+            if (hitA && aNear > best->t) hitA = false;                                         \
+            if (hitA && hitB) {                                                                \
+                bool bFirst = bNear < aNear;                                                   \
+                stack[sp++] = bFirst ? codes.x : codes.y;                                      \
+                node = bFirst ? codes.y : codes.x;                                             \
+            } else if (hitA) {                                                                 \
+                node = codes.x;                                                                \
+            } else if (hitB) {                                                                 \
+                node = codes.y;                                                                \
+            } else {                                                                           \
+                if (sp == 0) break;                                                            \
+                node = stack[--sp];                                                            \
+            }                                                                                  \
+        }                                                                                      \
+    }
+
+#define PLAIN_LEAF(code) leaf_plain(sc, code, origin, direction, time, tMin, best)
+
+// Nearest t along the ray over a tree of plain geometry - a volume's boundary. INFINITY on a miss.
+inline float boundary_t(const Scene* sc, int root, float3 origin, float3 direction, float time,
+                        float tMin, float tMax) {
+    Closest found;
+    found.t = tMax;
+    found.kind = 0;
+    Closest* best = &found;
+    BVH_TRAVERSE(PLAIN_LEAF)
+    return found.kind != 0 ? found.t : INFINITY;
 }
 
 // ConstantMedium.hit: find where the ray enters and leaves the boundary, then stop it at a
 // random depth drawn from the density. A depth past the far wall means the ray passes through.
-inline bool medium_hit(__global const float* nodeBounds, __global const int* nodeLinks,
-                       __global const float* spheres, __global const int* sphereMaterials,
-                       __global const float* triangles, __global const int* triangleMaterials,
-                       __global const float* quads, __global const int* quadMaterials,
-                       __global const int* mediumInts, __global const float* mediumFloats,
-                       int index, float3 origin, float3 direction, float time,
-                       float tMin, float tMax, Rng* rng, HitRecord* rec) {
-    int boundaryRoot = mediumInts[index * 2];
-    int material = mediumInts[index * 2 + 1];
-    float negativeInverseDensity = mediumFloats[index];
+inline bool medium_t(const Scene* sc, int index, float3 origin, float3 direction, float time,
+                     float tMin, float tMax, Rng* rng, float* tOut) {
+    int boundaryRoot = sc->mediumInts[index * 2];
+    float negativeInverseDensity = sc->mediumFloats[index];
 
-    HitRecord entry;
-    HitRecord exit;
-    if (!boundary_hit(nodeBounds, nodeLinks, spheres, sphereMaterials, triangles, triangleMaterials,
-                      quads, quadMaterials, boundaryRoot, origin, direction, time,
-                      -INFINITY, INFINITY, &entry)) return false;
-    if (!boundary_hit(nodeBounds, nodeLinks, spheres, sphereMaterials, triangles, triangleMaterials,
-                      quads, quadMaterials, boundaryRoot, origin, direction, time,
-                      entry.t + 0.0001f, INFINITY, &exit)) return false;
+    float entry = boundary_t(sc, boundaryRoot, origin, direction, time, -INFINITY, INFINITY);
+    if (entry == INFINITY) return false;
+    float exit = boundary_t(sc, boundaryRoot, origin, direction, time, entry + 0.0001f, INFINITY);
+    if (exit == INFINITY) return false;
 
-    float start = entry.t < tMin ? tMin : entry.t;
-    float end = exit.t > tMax ? tMax : exit.t;
+    float start = entry < tMin ? tMin : entry;
+    float end = exit > tMax ? tMax : exit;
     if (start >= end) return false;
     if (start < 0.0f) start = 0.0f;
 
@@ -339,68 +400,85 @@ inline bool medium_hit(__global const float* nodeBounds, __global const int* nod
     float hitDistance = negativeInverseDensity * log(rng_float(rng));
     if (hitDistance > distanceInside) return false;
 
-    rec->t = start + hitDistance / rayLength;
-    rec->point = origin + rec->t * direction;
-    rec->normal = (float3)(1.0f, 0.0f, 0.0f);          // arbitrary: fog has no surface
-    rec->frontFace = true;
-    rec->material = material;
-    rec->u = 0.0f;
-    rec->v = 0.0f;
+    *tOut = start + hitDistance / rayLength;
     return true;
 }
 
+// A leaf of the scene tree: plain geometry, plus the volumes that only the scene tree holds.
+inline void leaf_world(const Scene* sc, int code, float3 origin, float3 direction, float time,
+                       float tMin, Rng* rng, Closest* best) {
+    int2 leaf = sc->leaves[~code];
+    for (int i = leaf.x; i < leaf.x + leaf.y; i++) {
+        int2 ref = sc->refs[i];
+        float t, u = 0.0f, v = 0.0f;
+        bool hit;
+        if (ref.x == LEAF_TRIANGLE) hit = triangle_t(sc, ref.y, origin, direction, tMin, best->t, &t, &u, &v);
+        else if (ref.x == LEAF_SPHERE) hit = sphere_t(sc, ref.y, origin, direction, time, tMin, best->t, &t);
+        else if (ref.x == LEAF_QUAD) hit = quad_t(sc, ref.y, origin, direction, tMin, best->t, &t, &u, &v);
+        else hit = medium_t(sc, ref.y, origin, direction, time, tMin, best->t, rng, &t);
+        if (hit) {
+            best->t = t; best->u = u; best->v = v; best->kind = ref.x; best->index = ref.y;
+        }
+    }
+}
+
+#define WORLD_LEAF(code) leaf_world(sc, code, origin, direction, time, tMin, rng, best)
+
 // Sphere.getSphereUv, from the outward normal.
-inline void sphere_uv(HitRecord* rec) {
-    float3 outwardNormal = rec->frontFace ? rec->normal : -rec->normal;
+inline void sphere_uv(float3 outwardNormal, HitRecord* rec) {
     float theta = acos(-outwardNormal.y);
     float phi = atan2(-outwardNormal.z, outwardNormal.x) + M_PI_F;
     rec->u = phi / (2.0f * M_PI_F);
     rec->v = theta / M_PI_F;
 }
 
-// Closest hit over the flattened tree; equivalent to BvhNode.hit narrowing the interval
-// as it descends.
-inline bool world_hit(__global const float* nodeBounds, __global const int* nodeLinks,
-                      __global const float* spheres, __global const int* sphereMaterials,
-                      __global const float* triangles, __global const int* triangleMaterials,
-                      __global const float* quads, __global const int* quadMaterials,
-                      __global const int* mediumInts, __global const float* mediumFloats,
-                      int rootNode, float3 origin, float3 direction, float time,
-                      float tMin, float tMax, Rng* rng, HitRecord* rec) {
-    int stack[STACK_SIZE];
-    int sp = 0;
-    stack[sp++] = rootNode;
+// Everything shading needs about the winning hit, computed once.
+inline void finish_hit(const Scene* sc, const Closest* best, float3 origin, float3 direction,
+                       float time, HitRecord* rec) {
+    rec->t = best->t;
+    rec->point = origin + best->t * direction;
+    rec->u = best->u;
+    rec->v = best->v;
+    float3 outwardNormal;
 
-    bool hitAnything = false;
-    float closest = tMax;
-
-    while (sp > 0) {
-        int node = stack[--sp];
-        if (!aabb_hit(nodeBounds, node, origin, direction, tMin, closest)) continue;
-
-        int first = nodeLinks[node * 2];
-        int second = nodeLinks[node * 2 + 1];
-
-        if (second < 0) {
-            HitRecord candidate;
-            bool hit = second == LEAF_MEDIUM
-                ? medium_hit(nodeBounds, nodeLinks, spheres, sphereMaterials, triangles, triangleMaterials,
-                             quads, quadMaterials, mediumInts, mediumFloats, first, origin, direction, time,
-                             tMin, closest, rng, &candidate)
-                : primitive_hit(spheres, sphereMaterials, triangles, triangleMaterials, quads, quadMaterials,
-                                second, first, origin, direction, time, tMin, closest, &candidate);
-            if (hit) {
-                hitAnything = true;
-                closest = candidate.t;
-                *rec = candidate;
-            }
-        } else if (sp + 2 <= STACK_SIZE) {
-            stack[sp++] = first;
-            stack[sp++] = second;
-        }
+    if (best->kind == LEAF_SPHERE) {
+        __global const float* s = sc->spheres + best->index * 8;
+        float3 center = (float3)(s[0], s[1], s[2]) + time * (float3)(s[3], s[4], s[5]);
+        outwardNormal = (rec->point - center) / s[6];
+        sphere_uv(outwardNormal, rec);
+        rec->material = sc->sphereMaterials[best->index];
+    } else if (best->kind == LEAF_TRIANGLE) {
+        __global const float4* t = sc->triangles + best->index * 3;
+        outwardNormal = cross(t[1].xyz, t[2].xyz);
+        outwardNormal = outwardNormal / length(outwardNormal);
+        rec->material = sc->triangleMaterials[best->index];
+    } else if (best->kind == LEAF_QUAD) {
+        __global const float* data = sc->quads + best->index * 16;
+        outwardNormal = (float3)(data[12], data[13], data[14]);
+        rec->material = sc->quadMaterials[best->index];
+    } else {
+        // Fog has no surface: the normal is arbitrary and the ray always counts as outside.
+        rec->normal = (float3)(1.0f, 0.0f, 0.0f);
+        rec->frontFace = true;
+        rec->material = sc->mediumInts[best->index * 2 + 1];
+        rec->u = 0.0f;
+        rec->v = 0.0f;
+        return;
     }
-    if (hitAnything && rec->u < 0.0f) sphere_uv(rec);
-    return hitAnything;
+    rec->frontFace = dot(direction, outwardNormal) < 0.0f;
+    rec->normal = rec->frontFace ? outwardNormal : -outwardNormal;
+}
+
+inline bool world_hit(const Scene* sc, int root, float3 origin, float3 direction, float time,
+                      float tMin, float tMax, Rng* rng, HitRecord* rec) {
+    Closest found;
+    found.t = tMax;
+    found.kind = 0;
+    Closest* best = &found;
+    BVH_TRAVERSE(WORLD_LEAF)
+    if (found.kind == 0) return false;
+    finish_hit(sc, &found, origin, direction, time, rec);
+    return true;
 }
 
 // ---------------------------------------------------------------- noise
@@ -706,11 +784,12 @@ inline float light_pdf_value(__global const float* quads, __global const int* qu
 // ---------------------------------------------------------------- entry point
 
 __kernel void render(__global const float* cam,
-                     __global const float* nodeBounds,
-                     __global const int* nodeLinks,
+                     __global const float4* nodes,
+                     __global const int2* leaves,
+                     __global const int2* refs,
                      __global const float* spheres,
                      __global const int* sphereMaterials,
-                     __global const float* triangles,
+                     __global const float4* triangles,
                      __global const int* triangleMaterials,
                      __global const float* quads,
                      __global const int* quadMaterials,
@@ -738,6 +817,19 @@ __kernel void render(__global const float* cam,
     int x = gid % width;
     int y = rowOffset + gid / width;
     if (y >= height) return;
+
+    Scene scene;
+    scene.nodes = nodes;
+    scene.leaves = leaves;
+    scene.refs = refs;
+    scene.spheres = spheres;
+    scene.sphereMaterials = sphereMaterials;
+    scene.triangles = triangles;
+    scene.triangleMaterials = triangleMaterials;
+    scene.quads = quads;
+    scene.quadMaterials = quadMaterials;
+    scene.mediumInts = mediumInts;
+    scene.mediumFloats = mediumFloats;
 
     float3 cameraCenter = (float3)(cam[0], cam[1], cam[2]);
     float3 pixel00      = (float3)(cam[3], cam[4], cam[5]);
@@ -777,9 +869,7 @@ __kernel void render(__global const float* cam,
 
         for (int depth = 0; depth < maxReflectionDepth; depth++) {
             HitRecord rec;
-            if (world_hit(nodeBounds, nodeLinks, spheres, sphereMaterials, triangles, triangleMaterials,
-                          quads, quadMaterials, mediumInts, mediumFloats, rootNode,
-                          origin, direction, time, 0.001f, INFINITY, &rng, &rec)) {
+            if (world_hit(&scene, rootNode, origin, direction, time, 0.001f, INFINITY, &rng, &rec)) {
                 sampleColor += throughput * material_emitted(matI, texI, texF, images,
                                                              perlinVectors, perlinPermutations, &rec);
                 ScatterRec srec;

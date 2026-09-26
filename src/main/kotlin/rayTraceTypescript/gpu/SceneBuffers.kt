@@ -4,11 +4,14 @@ package rayTraceTypescript.gpu
  * The scene, flattened into primitive arrays the OpenCL kernel can read.
  *
  * Layout (see raytracer.cl, which mirrors these strides):
- *  - [nodeBounds]: 6 floats per node - min xyz, max xyz
- *  - [nodeLinks]: 2 ints per node - inner node: child node indices; leaf: the primitive index
- *    plus [LEAF_SPHERE] or [LEAF_TRIANGLE]
+ *  - [nodes]: 16 ints per inner node, floats as raw bits - both children's boxes and codes,
+ *    laid out as [BvhBuilder] describes
+ *  - [leaves]: 2 ints per leaf - first entry in [refs], count
+ *  - [refs]: 2 ints per primitive, in leaf order - its kind ([LEAF_SPHERE], [LEAF_TRIANGLE],
+ *    [LEAF_QUAD] or [LEAF_MEDIUM]) and its index in that kind's buffer
  *  - [spheres]: 8 floats per sphere - center at t=0 (3), center movement (3), radius, unused
- *  - [triangles]: 12 floats per facet - first vertex (3), two edges (3 + 3), unused (3)
+ *  - [triangles]: 12 floats per facet, in leaf order - first vertex, two edges, each padded to a
+ *    float4
  *  - [quads]: 16 floats - corner (3), the two edges (3 + 3), the basis vector w (3),
  *    the plane normal (3) and its offset
  *  - [materialInts]: 2 ints per material - type (0 Lambertian, 1 Metal, 2 Dielectric,
@@ -24,8 +27,9 @@ package rayTraceTypescript.gpu
  *    from the CPU tables so both renderers sample the same noise field
  */
 class SceneBuffers(
-    val nodeBounds: FloatArray,
-    val nodeLinks: IntArray,
+    val nodes: IntArray,
+    val leaves: IntArray,
+    val refs: IntArray,
     val spheres: FloatArray,
     val sphereMaterials: IntArray,
     val triangles: FloatArray,
@@ -45,7 +49,7 @@ class SceneBuffers(
     val rootNode: Int,
     val maxDepth: Int
 ) {
-    val nodeCount: Int get() = nodeLinks.size / NODE_LINK_STRIDE
+    val nodeCount: Int get() = nodes.size / NODE_INTS
     val sphereCount: Int get() = sphereMaterials.size
     val triangleCount: Int get() = triangleMaterials.size
     val quadCount: Int get() = quadMaterials.size
@@ -53,8 +57,8 @@ class SceneBuffers(
     val lightCount: Int get() = lights.size / 2
 
     companion object {
-        const val NODE_BOUNDS_STRIDE = 6
-        const val NODE_LINK_STRIDE = 2
+        /** Ints per inner BVH node, see [BvhBuilder]. */
+        const val NODE_INTS = 16
         const val SPHERE_STRIDE = 8
         const val TRIANGLE_STRIDE = 12
         const val QUAD_STRIDE = 16
@@ -67,7 +71,7 @@ class SceneBuffers(
         /** 256 lattice vectors of x/y/z, and three 256-entry permutations, per Perlin instance. */
         const val PERLIN_BLOCK = 768
 
-        /** Marks a node as a leaf; its first link is then an index into that primitive's buffer. */
+        /** Primitive kinds, as written into [refs]. */
         const val LEAF_SPHERE = -1
         const val LEAF_TRIANGLE = -2
         const val LEAF_QUAD = -3

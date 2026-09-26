@@ -34,11 +34,15 @@ import kotlin.random.Random
 class GpuRenderer : Renderer {
 
     override fun render(world: Hittable, setup: CameraSetup, outputPath: Path): Long {
+        val flattenStart = System.nanoTime()
         val scene = SceneFlattener.flatten(world, setup.lights)
         val pixels = FloatArray(setup.totalPixels * 3)
+        val flattenMs = (System.nanoTime() - flattenStart) / 1_000_000
 
         OpenClContext.create().use { cl ->
+            val buildStart = System.nanoTime()
             val program = cl.buildProgram(kernelSource(), BUILD_OPTIONS)
+            val buildMs = (System.nanoTime() - buildStart) / 1_000_000
             val kernel = MemoryStack.stackPush().use { stack ->
                 val errcode = stack.mallocInt(1)
                 val handle = clCreateKernel(program, "render", errcode)
@@ -52,8 +56,9 @@ class GpuRenderer : Renderer {
                 fun readOnly(data: IntArray) = create(cl.context, pad(data)).also { buffers += it }
 
                 val cameraBuffer = readOnly(cameraParameters(setup))
-                val nodeBounds = readOnly(scene.nodeBounds)
-                val nodeLinks = readOnly(scene.nodeLinks)
+                val nodes = readOnly(scene.nodes)
+                val leaves = readOnly(scene.leaves)
+                val refs = readOnly(scene.refs)
                 val spheres = readOnly(scene.spheres)
                 val sphereMaterials = readOnly(scene.sphereMaterials)
                 val triangles = readOnly(scene.triangles)
@@ -86,7 +91,7 @@ class GpuRenderer : Renderer {
 
                 var arg = 0
                 for (buffer in listOf(
-                    cameraBuffer, nodeBounds, nodeLinks, spheres, sphereMaterials,
+                    cameraBuffer, nodes, leaves, refs, spheres, sphereMaterials,
                     triangles, triangleMaterials, quads, quadMaterials, mediumInts, mediumFloats, lights,
                     materialInts, materialFloats, textureInts, textureFloats, textureImages,
                     perlinVectors, perlinPermutations, output
@@ -105,6 +110,7 @@ class GpuRenderer : Renderer {
                 clSetKernelArg1l(kernel, arg, seed())
 
                 val progress = ProgressBar(setup.totalPixels)
+                val kernelStart = System.nanoTime()
                 MemoryStack.stackPush().use { stack ->
                     val globalWorkSize = stack.mallocPointer(1)
                     var row = 0
@@ -121,6 +127,12 @@ class GpuRenderer : Renderer {
                         progress.report(row * setup.imageWidth)
                     }
                 }
+                val kernelMs = (System.nanoTime() - kernelStart) / 1_000_000
+                // Kept apart so the kernel's own speed is not buried under scene preparation.
+                System.err.println(
+                    "\n[gpu] flatten $flattenMs ms, build $buildMs ms, kernel $kernelMs ms " +
+                        "(${scene.nodeCount} nodes, depth ${scene.maxDepth})"
+                )
 
                 OpenClContext.check(
                     clEnqueueReadBuffer(cl.queue, output, true, 0, pixels, null, null),

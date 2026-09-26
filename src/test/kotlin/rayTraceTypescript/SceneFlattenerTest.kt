@@ -39,13 +39,15 @@ class SceneFlattenerTest {
         val world = scene()
         val buffers = SceneFlattener.flatten(world)
         val box = world.aabbBoundingBox()
-        val root = buffers.rootNode * SceneBuffers.NODE_BOUNDS_STRIDE
-        assertEquals(box.x.min, buffers.nodeBounds[root])
-        assertEquals(box.y.min, buffers.nodeBounds[root + 1])
-        assertEquals(box.z.min, buffers.nodeBounds[root + 2])
-        assertEquals(box.x.max, buffers.nodeBounds[root + 3])
-        assertEquals(box.y.max, buffers.nodeBounds[root + 4])
-        assertEquals(box.z.max, buffers.nodeBounds[root + 5])
+        // The root stores its two children's boxes; together they must cover the world.
+        val at = buffers.rootNode * SceneBuffers.NODE_INTS
+        fun f(k: Int) = java.lang.Float.intBitsToFloat(buffers.nodes[at + k])
+        assertEquals(box.x.min, minOf(f(0), f(4)))
+        assertEquals(box.x.max, maxOf(f(1), f(5)))
+        assertEquals(box.y.min, minOf(f(2), f(6)))
+        assertEquals(box.y.max, maxOf(f(3), f(7)))
+        assertEquals(box.z.min, minOf(f(8), f(10)))
+        assertEquals(box.z.max, maxOf(f(9), f(11)))
     }
 
     @Test
@@ -64,14 +66,16 @@ class SceneFlattenerTest {
         assertEquals(1, buffers.sphereCount)
         assertEquals(2, buffers.triangles.size / SceneBuffers.TRIANGLE_STRIDE)
 
-        val leafKinds = (0 until buffers.nodeCount)
-            .map { buffers.nodeLinks[it * SceneBuffers.NODE_LINK_STRIDE + 1] }
+        val leafKinds = buffers.refs.filterIndexed { i, _ -> i % 2 == 0 }
         assertEquals(2, leafKinds.count { it == SceneBuffers.LEAF_TRIANGLE })
         assertEquals(1, leafKinds.count { it == SceneBuffers.LEAF_SPHERE })
 
-        // First vertex and both edges, exactly as the kernel reads them.
-        assertEquals(1.0f, buffers.triangles[3])   // edge1.x of the first facet
-        assertEquals(1.0f, buffers.triangles[7])   // edge2.y of the first facet
+        // First vertex and both edges, each padded to a float4, exactly as the kernel reads them.
+        val first = buffers.triangles.copyOfRange(0, SceneBuffers.TRIANGLE_STRIDE)
+        assertTrue(
+            first.contentEquals(floatArrayOf(0f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, 0f, 1f, 0f, 0f)) ||
+                first.contentEquals(floatArrayOf(0f, 0f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, 0f, 1f, 0f))
+        )
     }
 
     @Test
