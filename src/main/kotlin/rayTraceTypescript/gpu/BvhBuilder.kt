@@ -233,8 +233,13 @@ internal class BvhBuilder {
         const val NODE_INTS = SceneBuffers.NODE_INTS
         const val MAX_LEAF = 4
         private const val BINS = 16
-        /** Cost of testing a node's two boxes, relative to one primitive test. */
-        private const val TRAVERSAL_COST = 1.0f
+        /**
+         * Cost of testing a node's two boxes, relative to one primitive test. The GPU reads both
+         * boxes in one go and tests them in registers, so it is cheap: measured on a GTX 1070,
+         * 0.5 beats 1.0 by 10% on a 331k-triangle mesh and 4% on the spheres (0.2-0.5 all alike),
+         * at the price of 5% on the few big quads of the Cornell box.
+         */
+        private const val TRAVERSAL_COST = 0.5f
         private const val INTERSECTION_COST = 1.0f
     }
 }
