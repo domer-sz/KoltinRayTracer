@@ -15,7 +15,10 @@ import kotlin.system.measureTimeMillis
 import rayTraceTypescript.scenes.BookScenes
 
 fun main() {
-    val scene = BookScenes.byName(System.getProperty("rt.scene", "earth"))
+    // -Drt.seed pins every random draw - the scene's layout and the render's samples - so two
+    // runs, or two versions of the renderer, can be compared image to image.
+    System.getProperty("rt.seed")?.toLongOrNull()?.let { rayTraceTypescript.utils.RandomSource.withSeed(it) }
+    val scene =BookScenes.byName(System.getProperty("rt.scene", "earth"))
     // The books' final scenes are quoted at sample counts that take hours; these let a scene
     // be scaled down without editing it.
     System.getProperty("rt.samples")?.toIntOrNull()?.let { scene.camera.samplesPerPixel = it }
