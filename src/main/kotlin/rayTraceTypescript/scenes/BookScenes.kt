@@ -42,6 +42,7 @@ object BookScenes {
         "cornell-smoke" to { cornellSmoke() },
         "final-week" to { finalWeek() },
         "cornell-final" to { cornellFinal() },
+        "cornell-model" to { cornellModel() },
         "showcase" to { showcase() },
         "model" to { model() }
     )
@@ -358,6 +359,35 @@ object BookScenes {
             camera = scene.camera.apply { this.lights = lights }
         )
     }
+
+    /**
+     * Not from the books: [cornellFinal] with a model standing on the floor beside the glass
+     * sphere, in front of the tall block. The path comes from -Drt.model=<path> or MODEL_FILE;
+     * the model is taken to be z-up, as files from 3D-printing tools are, and -Drt.model.turn
+     * spins it about the vertical axis (degrees) to face the camera.
+     */
+    fun cornellModel(
+        path: String = System.getProperty("rt.model") ?: System.getenv("MODEL_FILE") ?: "model.stl",
+        turnDegrees: Float = System.getProperty("rt.model.turn")?.toFloatOrNull() ?: 0.0f,
+        samples: Int = 200,
+        width: Int = 600
+    ): SceneDefinition {
+        val scene = cornellFinal(samples, width)
+        val grey = Lambertian(Color(0.45f, 0.45f, 0.45f))
+        val mesh = MeshLoader.load(path)
+            .zUpToYUp()
+            .rotatedY(turnDegrees)
+            .standingOnFloor(targetHeight = MODEL_HEIGHT)
+            .transformed(1.0f, Vector(0f, 0f, 0f), Vector(360f, 0f, 170f))
+        println("Loaded ${mesh.triangleCount} triangles from $path")
+
+        val world = scene.world as HittableList
+        world.add(BvhNode(HittableList(mesh.toHittables(grey).toMutableList())))
+        return SceneDefinition(name = "cornell-model", world = world, camera = scene.camera)
+    }
+
+    /** Height the model in [cornellModel] is scaled to: a little over half the tall block. */
+    private const val MODEL_HEIGHT = 190.0f
 
     /**
      * Not from the books: one widescreen room holding what the two books added - quads, a

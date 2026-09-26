@@ -63,6 +63,33 @@ class Mesh(val vertices: FloatArray) {
         return Mesh(moved)
     }
 
+    /**
+     * Stands up a model authored with z as up - the convention of 3D-printing tools - in this
+     * project's y-up world. A proper rotation about x, so the facet winding (and with it every
+     * normal) survives.
+     */
+    fun zUpToYUp(): Mesh = remapped { x, y, z, out -> out[0] = x; out[1] = z; out[2] = -y }
+
+    /** Turns the model about the vertical axis by [degrees], to face it where a scene wants. */
+    fun rotatedY(degrees: Float): Mesh {
+        val radians = Math.toRadians(degrees.toDouble())
+        val cos = kotlin.math.cos(radians).toFloat()
+        val sin = kotlin.math.sin(radians).toFloat()
+        return remapped { x, y, z, out -> out[0] = cos * x + sin * z; out[1] = y; out[2] = -sin * x + cos * z }
+    }
+
+    private inline fun remapped(map: (Float, Float, Float, FloatArray) -> Unit): Mesh {
+        val moved = FloatArray(vertices.size)
+        val out = FloatArray(3)
+        var i = 0
+        while (i < vertices.size) {
+            map(vertices[i], vertices[i + 1], vertices[i + 2], out)
+            moved[i] = out[0]; moved[i + 1] = out[1]; moved[i + 2] = out[2]
+            i += 3
+        }
+        return Mesh(moved)
+    }
+
     fun toHittables(material: Material): List<Hittable> = (0 until triangleCount).map { index ->
         val at = index * VERTEX_FLOATS
         Triangle(
