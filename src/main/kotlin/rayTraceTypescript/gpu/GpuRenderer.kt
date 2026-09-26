@@ -41,7 +41,11 @@ class GpuRenderer : Renderer {
 
         OpenClContext.create().use { cl ->
             val buildStart = System.nanoTime()
-            val program = cl.buildProgram(kernelSource(), BUILD_OPTIONS)
+            // -Drt.cl.options adds compiler flags for experiments, e.g. -cl-nv-verbose.
+            val extra = System.getProperty("rt.cl.options") ?: ""
+            val options = listOf(BUILD_OPTIONS, scene.kernelDefines(), registerCap(cl, scene, extra), extra)
+                .joinToString(" ").trim()
+            val program = cl.buildProgram(kernelSource(), options)
             val buildMs = (System.nanoTime() - buildStart) / 1_000_000
             val kernel = MemoryStack.stackPush().use { stack ->
                 val errcode = stack.mallocInt(1)
@@ -148,6 +152,17 @@ class GpuRenderer : Renderer {
         }
 
         return setup.totalPixels.toLong() * setup.samplesPerPixel
+    }
+
+    /**
+     * Left alone, NVIDIA's compiler gives the kernel ~100-128 registers, which fits only a
+     * quarter of the threads a Pascal SM can hold. Capping registers costs some spilling but
+     * hides memory latency far better: measured on a GTX 1070, 64 is best across the scenes,
+     * except that volumes (a nested traversal) want 72. Only NVIDIA understands the flag.
+     */
+    private fun registerCap(cl: OpenClContext, scene: SceneBuffers, extra: String): String {
+        if (!cl.extensions.contains("cl_nv_compiler_options") || extra.contains("maxrregcount")) return ""
+        return "-cl-nv-maxrregcount=${if (scene.mediumCount > 0) 72 else 64}"
     }
 
     /** Same seed as the CPU path when the test harness pinned one, random otherwise. */

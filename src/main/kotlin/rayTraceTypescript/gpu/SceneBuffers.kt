@@ -56,6 +56,36 @@ class SceneBuffers(
     val mediumCount: Int get() = mediumFloats.size
     val lightCount: Int get() = lights.size / 2
 
+    /**
+     * The kernel's feature switches for this scene (see the top of raytracer.cl): a scene
+     * without volumes, textures or moving spheres gets a kernel without that code, which needs
+     * fewer registers and so keeps more of the GPU busy.
+     */
+    fun kernelDefines(): String {
+        val kinds = refs.filterIndexed { i, _ -> i % 2 == 0 }.toSet()
+        val materials = materialInts.filterIndexed { i, _ -> i % MATERIAL_INT_STRIDE == 0 }.toSet()
+        val textures = textureInts.filterIndexed { i, _ -> i % TEXTURE_INT_STRIDE == 0 }.toSet()
+        val moving = (0 until sphereCount).any { s ->
+            (3..5).any { spheres[s * SPHERE_STRIDE + it] != 0.0f }
+        }
+        val features = linkedMapOf(
+            "HAS_SPHERES" to (LEAF_SPHERE in kinds),
+            "HAS_TRIANGLES" to (LEAF_TRIANGLE in kinds),
+            "HAS_QUADS" to (LEAF_QUAD in kinds),
+            "HAS_MEDIA" to (LEAF_MEDIUM in kinds),
+            "HAS_MOTION" to moving,
+            "HAS_LIGHTS" to (lightCount > 0),
+            "TEX_CHECKER" to (1 in textures),
+            "TEX_IMAGE" to (2 in textures),
+            "TEX_NOISE" to (4 in textures),
+            "MAT_METAL" to (1 in materials),
+            "MAT_DIELECTRIC" to (2 in materials),
+            "MAT_EMISSIVE" to (3 in materials),
+            "MAT_ISOTROPIC" to (4 in materials)
+        )
+        return features.entries.joinToString(" ") { (name, on) -> "-D$name=${if (on) 1 else 0}" }
+    }
+
     companion object {
         /** Ints per inner BVH node, see [BvhBuilder]. */
         const val NODE_INTS = 16

@@ -3,6 +3,7 @@ package rayTraceTypescript.gpu
 import org.lwjgl.PointerBuffer
 import org.lwjgl.opencl.CL
 import org.lwjgl.opencl.CL10.CL_CONTEXT_PLATFORM
+import org.lwjgl.opencl.CL10.CL_DEVICE_EXTENSIONS
 import org.lwjgl.opencl.CL10.CL_DEVICE_NAME
 import org.lwjgl.opencl.CL10.CL_DEVICE_TYPE_ALL
 import org.lwjgl.opencl.CL10.CL_DEVICE_TYPE_GPU
@@ -30,6 +31,9 @@ class OpenClContext private constructor(
     val deviceName: String
 ) : AutoCloseable {
 
+    /** The extensions the device reports, e.g. cl_nv_compiler_options for NVIDIA's build flags. */
+    val extensions: String by lazy { deviceString(device, CL_DEVICE_EXTENSIONS) }
+
     /** Compiles a kernel program; throws with the device's build log when compilation fails. */
     fun buildProgram(source: String, options: String): Long {
         MemoryStack.stackPush().use { stack ->
@@ -41,6 +45,9 @@ class OpenClContext private constructor(
             if (status != CL_SUCCESS) {
                 throw OpenClException("Kernel build failed (error $status):\n${buildLog(program)}")
             }
+            // -Drt.cl.log shows what the compiler said even on success - with NVIDIA's
+            // -cl-nv-verbose that is the register and spill count, the kernel's key limits.
+            if (System.getProperty("rt.cl.log") != null) System.err.println("[gpu] build log:\n${buildLog(program)}")
             return program
         }
     }
@@ -163,13 +170,15 @@ class OpenClContext private constructor(
             return (matching.firstOrNull { it.second } ?: matching.firstOrNull())?.first
         }
 
-        private fun deviceName(device: Long): String {
+        private fun deviceName(device: Long): String = deviceString(device, CL_DEVICE_NAME)
+
+        private fun deviceString(device: Long, param: Int): String {
             MemoryStack.stackPush().use { stack ->
                 val size = stack.mallocPointer(1)
-                clGetDeviceInfo(device, CL_DEVICE_NAME, null as java.nio.ByteBuffer?, size)
+                clGetDeviceInfo(device, param, null as java.nio.ByteBuffer?, size)
                 val name = MemoryUtil.memAlloc(size.get(0).toInt().coerceAtLeast(1))
                 try {
-                    clGetDeviceInfo(device, CL_DEVICE_NAME, name, null)
+                    clGetDeviceInfo(device, param, name, null)
                     return MemoryUtil.memUTF8(name, name.capacity() - 1).trim()
                 } finally {
                     MemoryUtil.memFree(name)

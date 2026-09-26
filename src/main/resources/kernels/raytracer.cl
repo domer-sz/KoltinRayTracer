@@ -11,6 +11,48 @@
 #define REJECTION_CAP 64
 #define RR_MIN_DEPTH  5
 
+// Scene features. GpuRenderer sets them with -D so a scene only pays - in code size and, above
+// all, in registers - for what it uses; a feature left undefined is compiled in.
+#ifndef HAS_SPHERES
+#define HAS_SPHERES 1
+#endif
+#ifndef HAS_TRIANGLES
+#define HAS_TRIANGLES 1
+#endif
+#ifndef HAS_QUADS
+#define HAS_QUADS 1
+#endif
+#ifndef HAS_MEDIA
+#define HAS_MEDIA 1
+#endif
+#ifndef HAS_MOTION
+#define HAS_MOTION 1
+#endif
+#ifndef HAS_LIGHTS
+#define HAS_LIGHTS 1
+#endif
+#ifndef TEX_CHECKER
+#define TEX_CHECKER 1
+#endif
+#ifndef TEX_IMAGE
+#define TEX_IMAGE 1
+#endif
+#ifndef TEX_NOISE
+#define TEX_NOISE 1
+#endif
+#ifndef MAT_METAL
+#define MAT_METAL 1
+#endif
+#ifndef MAT_DIELECTRIC
+#define MAT_DIELECTRIC 1
+#endif
+#ifndef MAT_EMISSIVE
+#define MAT_EMISSIVE 1
+#endif
+#ifndef MAT_ISOTROPIC
+#define MAT_ISOTROPIC 1
+#endif
+
 // ---------------------------------------------------------------- random numbers
 
 typedef struct {
@@ -123,7 +165,8 @@ inline bool sphere_hit(__global const float* spheres, __global const int* sphere
                        float3 origin, float3 direction, float time, float tMin, float tMax,
                        HitRecord* rec) {
     __global const float* s = spheres + index * 8;
-    float3 center = (float3)(s[0], s[1], s[2]) + time * (float3)(s[3], s[4], s[5]);
+    float3 center = (float3)(s[0], s[1], s[2]);
+    if (HAS_MOTION) center += time * (float3)(s[3], s[4], s[5]);
     float radius = s[6];
 
     float3 oc = origin - center;
@@ -219,7 +262,8 @@ typedef struct {
 inline bool sphere_t(const Scene* sc, int index, float3 origin, float3 direction, float time,
                      float tMin, float tMax, float* tOut) {
     __global const float* s = sc->spheres + index * 8;
-    float3 center = (float3)(s[0], s[1], s[2]) + time * (float3)(s[3], s[4], s[5]);
+    float3 center = (float3)(s[0], s[1], s[2]);
+    if (HAS_MOTION) center += time * (float3)(s[3], s[4], s[5]);
     float radius = s[6];
 
     float3 oc = origin - center;
@@ -303,9 +347,9 @@ inline void leaf_plain(const Scene* sc, int code, float3 origin, float3 directio
         int2 ref = sc->refs[i];
         float t, u = 0.0f, v = 0.0f;
         bool hit;
-        if (ref.x == LEAF_TRIANGLE) hit = triangle_t(sc, ref.y, origin, direction, tMin, best->t, &t, &u, &v);
-        else if (ref.x == LEAF_SPHERE) hit = sphere_t(sc, ref.y, origin, direction, time, tMin, best->t, &t);
-        else if (ref.x == LEAF_QUAD) hit = quad_t(sc, ref.y, origin, direction, tMin, best->t, &t, &u, &v);
+        if (HAS_TRIANGLES && ref.x == LEAF_TRIANGLE) hit = triangle_t(sc, ref.y, origin, direction, tMin, best->t, &t, &u, &v);
+        else if (HAS_SPHERES && ref.x == LEAF_SPHERE) hit = sphere_t(sc, ref.y, origin, direction, time, tMin, best->t, &t);
+        else if (HAS_QUADS && ref.x == LEAF_QUAD) hit = quad_t(sc, ref.y, origin, direction, tMin, best->t, &t, &u, &v);
         else hit = false;
         if (hit) {
             best->t = t; best->u = u; best->v = v; best->kind = ref.x; best->index = ref.y;
@@ -412,10 +456,11 @@ inline void leaf_world(const Scene* sc, int code, float3 origin, float3 directio
         int2 ref = sc->refs[i];
         float t, u = 0.0f, v = 0.0f;
         bool hit;
-        if (ref.x == LEAF_TRIANGLE) hit = triangle_t(sc, ref.y, origin, direction, tMin, best->t, &t, &u, &v);
-        else if (ref.x == LEAF_SPHERE) hit = sphere_t(sc, ref.y, origin, direction, time, tMin, best->t, &t);
-        else if (ref.x == LEAF_QUAD) hit = quad_t(sc, ref.y, origin, direction, tMin, best->t, &t, &u, &v);
-        else hit = medium_t(sc, ref.y, origin, direction, time, tMin, best->t, rng, &t);
+        if (HAS_TRIANGLES && ref.x == LEAF_TRIANGLE) hit = triangle_t(sc, ref.y, origin, direction, tMin, best->t, &t, &u, &v);
+        else if (HAS_SPHERES && ref.x == LEAF_SPHERE) hit = sphere_t(sc, ref.y, origin, direction, time, tMin, best->t, &t);
+        else if (HAS_QUADS && ref.x == LEAF_QUAD) hit = quad_t(sc, ref.y, origin, direction, tMin, best->t, &t, &u, &v);
+        else if (HAS_MEDIA) hit = medium_t(sc, ref.y, origin, direction, time, tMin, best->t, rng, &t);
+        else hit = false;
         if (hit) {
             best->t = t; best->u = u; best->v = v; best->kind = ref.x; best->index = ref.y;
         }
@@ -441,18 +486,19 @@ inline void finish_hit(const Scene* sc, const Closest* best, float3 origin, floa
     rec->v = best->v;
     float3 outwardNormal;
 
-    if (best->kind == LEAF_SPHERE) {
+    if (HAS_SPHERES && best->kind == LEAF_SPHERE) {
         __global const float* s = sc->spheres + best->index * 8;
-        float3 center = (float3)(s[0], s[1], s[2]) + time * (float3)(s[3], s[4], s[5]);
+        float3 center = (float3)(s[0], s[1], s[2]);
+    if (HAS_MOTION) center += time * (float3)(s[3], s[4], s[5]);
         outwardNormal = (rec->point - center) / s[6];
         sphere_uv(outwardNormal, rec);
         rec->material = sc->sphereMaterials[best->index];
-    } else if (best->kind == LEAF_TRIANGLE) {
+    } else if (HAS_TRIANGLES && best->kind == LEAF_TRIANGLE) {
         __global const float4* t = sc->triangles + best->index * 3;
         outwardNormal = cross(t[1].xyz, t[2].xyz);
         outwardNormal = outwardNormal / length(outwardNormal);
         rec->material = sc->triangleMaterials[best->index];
-    } else if (best->kind == LEAF_QUAD) {
+    } else if (HAS_QUADS && best->kind == LEAF_QUAD) {
         __global const float* data = sc->quads + best->index * 16;
         outwardNormal = (float3)(data[12], data[13], data[14]);
         rec->material = sc->quadMaterials[best->index];
@@ -551,7 +597,7 @@ inline float3 texture_value(__global const int* texI, __global const float* texF
             __global const float* f = texF + index * 4;
             return (float3)(f[0], f[1], f[2]);
         }
-        if (type == 1) {                                  // CheckerTexture
+        if (TEX_CHECKER && type == 1) {                                  // CheckerTexture
             float inverted = texF[index * 4];
             int xInteger = (int)floor(inverted * p.x);
             int yInteger = (int)floor(inverted * p.y);
@@ -560,7 +606,7 @@ inline float3 texture_value(__global const int* texI, __global const float* texF
             index = isEven ? texI[index * 4 + 1] : texI[index * 4 + 2];
             continue;
         }
-        if (type == 2) {                                  // ImageTexture
+        if (TEX_IMAGE && type == 2) {                                  // ImageTexture
             int offset = texI[index * 4 + 1];
             int width = texI[index * 4 + 2];
             int height = texI[index * 4 + 3];
@@ -576,7 +622,7 @@ inline float3 texture_value(__global const int* texI, __global const float* texF
             int at = offset + (j * width + i) * 3;
             return (float3)((float)images[at], (float)images[at + 1], (float)images[at + 2]) * (1.0f / 255.0f);
         }
-        if (type == 4) {                                  // NoiseTexture
+        if (TEX_NOISE && type == 4) {                                  // NoiseTexture
             float scale = texF[index * 4];
             int block = texI[index * 4 + 1];
             float value = 0.5f * (1.0f + sin(scale * p.z
@@ -613,7 +659,7 @@ inline float3 material_emitted(__global const int* matI,
                                const HitRecord* rec) {
     // Only emissive materials, and only through their front: a lamp does not light the room
     // through the back of the ceiling.
-    if (matI[rec->material * 2] != 3 || !rec->frontFace) return (float3)(0.0f, 0.0f, 0.0f);
+    if (!MAT_EMISSIVE || matI[rec->material * 2] != 3 || !rec->frontFace) return (float3)(0.0f, 0.0f, 0.0f);
     return texture_value(texI, texF, images, perlinVectors, perlinPermutations,
                          matI[rec->material * 2 + 1], rec->u, rec->v, rec->point);
 }
@@ -660,9 +706,9 @@ inline bool scatter(__global const int* matI, __global const float* matF,
     srec->pdfKind = PDF_COSINE;
     srec->pdfAxis = rec->normal;
 
-    if (type == 3) return false;                          // DiffuseLight: the path ends here
+    if (MAT_EMISSIVE && type == 3) return false;                          // DiffuseLight: the path ends here
 
-    if (type == 4) {                                      // Isotropic: fog scatters anywhere
+    if (MAT_ISOTROPIC && type == 4) {                                      // Isotropic: fog scatters anywhere
         srec->attenuation = texture_value(texI, texF, images, perlinVectors, perlinPermutations,
                                           texture, rec->u, rec->v, rec->point);
         srec->direction = random_unit_vector(rng);
@@ -683,7 +729,7 @@ inline bool scatter(__global const int* matI, __global const float* matF,
     float3 unitDirection = inDirection / length(inDirection);
     srec->skipPdf = true;                                 // specular from here on
 
-    if (type == 1) {                                      // Metal
+    if (MAT_METAL && type == 1) {                                      // Metal
         float fuzz = matF[rec->material * 2];
         float3 reflected = unitDirection - rec->normal * (2.0f * dot(unitDirection, rec->normal));
         reflected = reflected / length(reflected);
@@ -693,7 +739,8 @@ inline bool scatter(__global const int* matI, __global const float* matF,
         return true;
     }
 
-    // Dielectric
+    // Dielectric - the only material left, unless the scene has none.
+    if (!MAT_DIELECTRIC) return false;
     float ri = matF[rec->material * 2 + 1];
     float refractionRatio = rec->frontFace ? (1.0f / ri) : ri;
     float cosTheta = fmin(dot(-unitDirection, rec->normal), 1.0f);
@@ -885,12 +932,12 @@ __kernel void render(__global const float* cam,
                 } else {
                     // Half the samples aimed at a light, half drawn by the surface itself.
                     float3 chosen = srec.direction;
-                    if (lightCount > 0 && rng_float(&rng) < 0.5f) {
+                    if (HAS_LIGHTS && lightCount > 0 && rng_float(&rng) < 0.5f) {
                         chosen = light_random(quads, spheres, lights, lightCount, rec.point, &rng);
                     }
 
                     float density = scatter_pdf_value(&srec, chosen);
-                    if (lightCount > 0) {
+                    if (HAS_LIGHTS && lightCount > 0) {
                         density = 0.5f * density + 0.5f * light_pdf_value(quads, quadMaterials,
                             spheres, sphereMaterials, lights, lightCount, rec.point, chosen);
                     }
