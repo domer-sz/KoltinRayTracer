@@ -821,58 +821,72 @@ __kernel void render(__global const float* restrict cam,
 
     float3 pixelColor = (float3)(0.0f, 0.0f, 0.0f);
 
-    for (int sample = sampleStart; sample < sampleStart + sampleCount; sample++) {
-        Rng rng;
-        rng_init(&rng, seed, (ulong)(y * width + x), (ulong)sample);
+    // One bounce per iteration rather than a loop over samples around a loop over bounces: a
+    // thread whose path has ended starts its next sample straight away, so the threads of a
+    // warp keep running the same bounce code instead of some idling while others start anew.
+    // Each sample still draws the same random numbers in the same order.
+    int sample = sampleStart;
+    int sampleEnd = sampleStart + sampleCount;
+    bool fresh = true;
+    Rng rng;
+    float3 origin, direction, throughput, sampleColor;
+    float time;
+    int depth;
 
-        // Camera.getRay
-        float offsetX = rng_float(&rng) - 0.5f;
-        float offsetY = rng_float(&rng) - 0.5f;
-        float3 pixelSample = pixel00
-            + pixelDeltaU * ((float)x + offsetX)
-            + pixelDeltaV * ((float)y + offsetY);
+    while (sample < sampleEnd) {
+        if (fresh) {
+            rng_init(&rng, seed, (ulong)(y * width + x), (ulong)sample);
 
-        float3 origin = cameraCenter;
-        if (defocusAngle > 0.0f) {
-            float2 p = random_in_unit_disc(&rng);
-            origin = cameraCenter + defocusDiscU * p.x + defocusDiscV * p.y;
+            // Camera.getRay
+            float offsetX = rng_float(&rng) - 0.5f;
+            float offsetY = rng_float(&rng) - 0.5f;
+            float3 pixelSample = pixel00
+                + pixelDeltaU * ((float)x + offsetX)
+                + pixelDeltaV * ((float)y + offsetY);
+
+            origin = cameraCenter;
+            if (defocusAngle > 0.0f) {
+                float2 p = random_in_unit_disc(&rng);
+                origin = cameraCenter + defocusDiscU * p.x + defocusDiscV * p.y;
+            }
+            direction = pixelSample - origin;
+            time = rng_float(&rng);
+
+            // Camera.rayColor as a throughput loop. A path that never escapes the scene
+            // within maxReflectionDepth bounces contributes nothing more, as on the CPU.
+            throughput = (float3)(1.0f, 1.0f, 1.0f);
+            sampleColor = (float3)(0.0f, 0.0f, 0.0f);
+            depth = 0;
+            fresh = false;
         }
-        float3 direction = pixelSample - origin;
-        float time = rng_float(&rng);
 
-        // Camera.rayColor, unrolled into a throughput loop. A path that never escapes the
-        // scene within maxReflectionDepth bounces contributes black, as on the CPU.
-        float3 throughput = (float3)(1.0f, 1.0f, 1.0f);
-        float3 sampleColor = (float3)(0.0f, 0.0f, 0.0f);
-
-        for (int depth = 0; depth < maxReflectionDepth; depth++) {
-            HitRecord rec;
-            if (world_hit(&scene, rootNode, origin, direction, time, 0.001f, INFINITY, &rng, &rec)) {
-                sampleColor += throughput * material_emitted(matI, texI, texF, images,
-                                                             perlinVectors, perlinPermutations, &rec);
-                ScatterRec srec;
-                if (!scatter(matI, matF, texI, texF, images, perlinVectors, perlinPermutations,
-                             &rec, direction, &rng, &srec)) {
-                    break;
+        bool done = false;
+        HitRecord rec;
+        if (world_hit(&scene, rootNode, origin, direction, time, 0.001f, INFINITY, &rng, &rec)) {
+            sampleColor += throughput * material_emitted(matI, texI, texF, images,
+                                                         perlinVectors, perlinPermutations, &rec);
+            ScatterRec srec;
+            if (!scatter(matI, matF, texI, texF, images, perlinVectors, perlinPermutations,
+                         &rec, direction, &rng, &srec)) {
+                done = true;
+            } else if (srec.skipPdf) {
+                throughput *= srec.attenuation;
+                origin = rec.point;
+                direction = srec.direction;
+            } else {
+                // Half the samples aimed at a light, half drawn by the surface itself.
+                float3 chosen = srec.direction;
+                if (HAS_LIGHTS && lightCount > 0 && rng_float(&rng) < 0.5f) {
+                    chosen = light_random(quads, spheres, lights, lightCount, rec.point, &rng);
                 }
 
-                if (srec.skipPdf) {
-                    throughput *= srec.attenuation;
-                    origin = rec.point;
-                    direction = srec.direction;
+                float density = scatter_pdf_value(&srec, chosen);
+                if (HAS_LIGHTS && lightCount > 0) {
+                    density = 0.5f * density + 0.5f * light_pdf_value(&scene, lights, lightCount, rec.point, chosen);
+                }
+                if (density < 1e-8f) {
+                    done = true;
                 } else {
-                    // Half the samples aimed at a light, half drawn by the surface itself.
-                    float3 chosen = srec.direction;
-                    if (HAS_LIGHTS && lightCount > 0 && rng_float(&rng) < 0.5f) {
-                        chosen = light_random(quads, spheres, lights, lightCount, rec.point, &rng);
-                    }
-
-                    float density = scatter_pdf_value(&srec, chosen);
-                    if (HAS_LIGHTS && lightCount > 0) {
-                        density = 0.5f * density + 0.5f * light_pdf_value(&scene, lights, lightCount, rec.point, chosen);
-                    }
-                    if (density < 1e-8f) break;
-
                     // Weigh the sample by how much the surface actually scatters that way;
                     // that division is what keeps the estimate unbiased.
                     float surface = scattering_pdf(matI[rec.material * 2], rec.normal, chosen);
@@ -881,29 +895,34 @@ __kernel void render(__global const float* restrict cam,
                     origin = rec.point;
                     direction = chosen;
                 }
-
-                // Russian roulette: past a few bounces, end dim paths at random and boost the
-                // survivors by the same odds, so the estimate stays unbiased. A warp waits for
-                // its longest path, so cutting the long tail is what keeps the GPU busy.
-                if (depth >= RR_MIN_DEPTH) {
-                    float survival = clamp(fmax(throughput.x, fmax(throughput.y, throughput.z)), 0.25f, 0.95f);
-                    if (rng_float(&rng) >= survival) break;
-                    throughput /= survival;
-                }
-            } else {
-                float3 escaped = background;
-                if (!flatBackground) {
-                    float3 unitDirection = direction / length(direction);
-                    float alpha = 0.5f * (unitDirection.y + 1.0f);
-                    escaped = (float3)(1.0f, 1.0f, 1.0f) * (1.0f - alpha)
-                            + (float3)(0.5f, 0.7f, 1.0f) * alpha;
-                }
-                sampleColor += throughput * escaped;
-                break;
             }
+
+            // Russian roulette: past a few bounces, end dim paths at random and boost the
+            // survivors by the same odds, so the estimate stays unbiased. A warp waits for
+            // its longest path, so cutting the long tail is what keeps the GPU busy.
+            if (!done && depth >= RR_MIN_DEPTH) {
+                float survival = clamp(fmax(throughput.x, fmax(throughput.y, throughput.z)), 0.25f, 0.95f);
+                if (rng_float(&rng) >= survival) done = true;
+                else throughput /= survival;
+            }
+        } else {
+            float3 escaped = background;
+            if (!flatBackground) {
+                float3 unitDirection = direction / length(direction);
+                float alpha = 0.5f * (unitDirection.y + 1.0f);
+                escaped = (float3)(1.0f, 1.0f, 1.0f) * (1.0f - alpha)
+                        + (float3)(0.5f, 0.7f, 1.0f) * alpha;
+            }
+            sampleColor += throughput * escaped;
+            done = true;
         }
 
-        pixelColor += sampleColor;
+        depth++;
+        if (done || depth >= maxReflectionDepth) {
+            pixelColor += sampleColor;
+            sample++;
+            fresh = true;
+        }
     }
 
     pixelColor *= pixelSamplesScale;
