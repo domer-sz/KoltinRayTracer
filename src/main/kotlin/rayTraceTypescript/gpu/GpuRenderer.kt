@@ -157,7 +157,7 @@ class GpuRenderer : Renderer {
     )
 
     companion object {
-        private const val ROWS_PER_BATCH = 16
+        private const val ROWS_PER_BATCH = 128
         // No fast-math: it would change shading brightness and break the nearZero/infinity checks.
         private const val BUILD_OPTIONS = "-cl-std=CL1.2"
         private const val KERNEL_RESOURCE = "/kernels/raytracer.cl"

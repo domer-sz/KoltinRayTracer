@@ -10,6 +10,7 @@
 #define STACK_SIZE    64
 #define BOUNDARY_STACK_SIZE 32
 #define REJECTION_CAP 64
+#define RR_MIN_DEPTH  5
 
 // ---------------------------------------------------------------- random numbers
 
@@ -166,14 +167,12 @@ inline bool sphere_hit(__global const float* spheres, __global const int* sphere
     float3 hitpoint = origin + root * direction;
     float3 outwardNormal = (hitpoint - center) / radius;
 
-    // Sphere.getSphereUv
-    float theta = acos(-outwardNormal.y);
-    float phi = atan2(-outwardNormal.z, outwardNormal.x) + M_PI_F;
-
     rec->point = hitpoint;
     rec->t = root;
-    rec->u = phi / (2.0f * M_PI_F);
-    rec->v = theta / M_PI_F;
+    // The texture coordinates cost an acos and an atan2, so they are left for the closest
+    // hit only (sphere_uv); a negative u marks them as still owed.
+    rec->u = -1.0f;
+    rec->v = 0.0f;
     rec->material = sphereMaterials[index];
     rec->frontFace = dot(direction, outwardNormal) < 0.0f;
     rec->normal = rec->frontFace ? outwardNormal : -outwardNormal;
@@ -350,6 +349,15 @@ inline bool medium_hit(__global const float* nodeBounds, __global const int* nod
     return true;
 }
 
+// Sphere.getSphereUv, from the outward normal.
+inline void sphere_uv(HitRecord* rec) {
+    float3 outwardNormal = rec->frontFace ? rec->normal : -rec->normal;
+    float theta = acos(-outwardNormal.y);
+    float phi = atan2(-outwardNormal.z, outwardNormal.x) + M_PI_F;
+    rec->u = phi / (2.0f * M_PI_F);
+    rec->v = theta / M_PI_F;
+}
+
 // Closest hit over the flattened tree; equivalent to BvhNode.hit narrowing the interval
 // as it descends.
 inline bool world_hit(__global const float* nodeBounds, __global const int* nodeLinks,
@@ -391,6 +399,7 @@ inline bool world_hit(__global const float* nodeBounds, __global const int* node
             stack[sp++] = second;
         }
     }
+    if (hitAnything && rec->u < 0.0f) sphere_uv(rec);
     return hitAnything;
 }
 
@@ -804,6 +813,15 @@ __kernel void render(__global const float* cam,
 
                     origin = rec.point;
                     direction = chosen;
+                }
+
+                // Russian roulette: past a few bounces, end dim paths at random and boost the
+                // survivors by the same odds, so the estimate stays unbiased. A warp waits for
+                // its longest path, so cutting the long tail is what keeps the GPU busy.
+                if (depth >= RR_MIN_DEPTH) {
+                    float survival = clamp(fmax(throughput.x, fmax(throughput.y, throughput.z)), 0.25f, 0.95f);
+                    if (rng_float(&rng) >= survival) break;
+                    throughput /= survival;
                 }
             } else {
                 float3 escaped = background;
