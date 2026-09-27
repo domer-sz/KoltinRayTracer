@@ -63,7 +63,10 @@ Pełna lista jest też w oknie pod **F1** (albo **H**, albo przycisk *Pomoc* w p
 | Przybliżanie / oddalanie | kółko myszy albo prawy przycisk + przeciąganie |
 | Kąt widzenia | `+` / `-` |
 | Reset widoku | `R` |
-| Postaw zaznaczony model na podłodze pod kursorem | Ctrl + klik w obraz |
+| Przestaw zaznaczony model – żółty zarys pokazuje, gdzie stanie (podłoga, kolumna, kula, inny model; przy ścianie u jej stóp) | Ctrl + przeciąganie albo Ctrl + klik |
+| Przesuń zaznaczony model w lewo / prawo / dalej / bliżej (względem kamery) | strzałki (Shift = krok 5× większy) |
+| Podnieś / opuść zaznaczony model | PageUp / PageDown |
+| Obróć zaznaczony model o 15° | `Q` / `E` albo `[` / `]` |
 | Usuń zaznaczony obiekt | `Delete` |
 | Odszumianie włącz / wyłącz | `D` |
 | Zapisz obraz (PPM + PNG, z odszumioną kopią) | `S` |

@@ -104,10 +104,31 @@ class PlacedObject(val name: String, private val mesh: Mesh) : SceneEntry {
     val triangleCount: Int get() = mesh.triangleCount
 
     /** The mesh stood up, turned, scaled to [height] and moved to its place. */
-    fun placedMesh(): Mesh = (if (zUp) mesh.zUpToYUp() else mesh)
+    fun placedMesh(): Mesh = shapedMesh()
+        .transformed(1.0f, Vector(0f, 0f, 0f), Vector(x.toFloat(), y.toFloat(), z.toFloat()))
+
+    /** The mesh stood up, turned and scaled, its footprint centred on the origin at y = 0. */
+    private fun shapedMesh(): Mesh = (if (zUp) mesh.zUpToYUp() else mesh)
         .rotatedY(rotation.toFloat())
         .standingOnFloor(targetHeight = height.toFloat())
-        .transformed(1.0f, Vector(0f, 0f, 0f), Vector(x.toFloat(), y.toFloat(), z.toFloat()))
+
+    @Volatile private var boundsFor: Triple<Boolean, Double, Double>? = null
+    @Volatile private var bounds = FloatArray(6)
+
+    /**
+     * The model's box relative to its position (min x, y, z, max x, y, z), for drawing it while
+     * it is dragged and for standing other models on it. Worked out again only when the model is
+     * turned, resized or stood up differently.
+     */
+    fun localBounds(): FloatArray {
+        val key = Triple(zUp, rotation, height)
+        if (key != boundsFor) {
+            val box = shapedMesh().bounds()
+            bounds = floatArrayOf(box.x.min, box.y.min, box.z.min, box.x.max, box.y.max, box.z.max)
+            boundsFor = key
+        }
+        return bounds
+    }
 
     override fun toString() = name
 }

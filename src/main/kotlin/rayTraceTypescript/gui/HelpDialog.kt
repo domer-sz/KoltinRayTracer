@@ -22,7 +22,11 @@ object HelpDialog {
             "R" to "Powrót do widoku startowego"
         ),
         "Obiekty" to listOf(
-            "Ctrl + klik w obraz" to "Postaw zaznaczony model na podłodze w tym miejscu",
+            "Ctrl + przeciąganie (lub klik)" to "Przestaw zaznaczony model; żółty zarys pokazuje, gdzie stanie: na podłodze, kolumnie, kuli, innym modelu, przy ścianie u jej stóp",
+            "Strzałki" to "Przesuń zaznaczony model w lewo, w prawo, dalej, bliżej (względem kamery)",
+            "PageUp / PageDown" to "Podnieś / opuść zaznaczony model",
+            "Q / E  lub  [ / ]" to "Obróć zaznaczony model o 15°",
+            "Shift + strzałki, PageUp, PageDown" to "To samo, pięć razy większy krok",
             "Delete" to "Usuń zaznaczony obiekt (także kolumnę lub kulę sceny)",
             "Panel: Dodaj model…" to "Wczytaj STL, OBJ, PLY, OFF, glTF, GLB lub 3MF",
             "Panel: X, Y, Z, Obrót, Wysokość" to "Ustaw zaznaczony model",

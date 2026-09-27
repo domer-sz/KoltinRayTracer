@@ -1,7 +1,10 @@
 package rayTraceTypescript.gui
 
 import rayTraceTypescript.Camera
+import rayTraceTypescript.Interval
 import rayTraceTypescript.Point
+import rayTraceTypescript.Ray
+import rayTraceTypescript.Vector
 import rayTraceTypescript.gpu.GpuRenderer
 import rayTraceTypescript.gpu.GpuSession
 import rayTraceTypescript.gpu.SceneFlattener
@@ -122,6 +125,8 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
     @Volatile private var shown: BufferedImage? = null
     @Volatile private var status = "Przygotowuję scenę…"
     @Volatile private var placeMarker: java.awt.Point? = null
+    /** Where a Ctrl-dragged model would stand, while the button is held. */
+    @Volatile private var ghost: DoubleArray? = null
     private val panel = ImagePanel()
     private lateinit var controls: ControlPanel
 
@@ -257,6 +262,13 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
      * switched on, and the added models.
      */
     private fun buildWorld(): Hittable {
+        val parts = mutableListOf<Hittable>(sceneWithoutModels())
+        for (o in objects) parts += HittableList(o.placedMesh().toHittables(o.material.material()).toMutableList())
+        return HittableList(parts)
+    }
+
+    /** The room and the parts of the scene switched on - everything but the added models. */
+    private fun sceneWithoutModels(): Hittable {
         val world = scene.world
         val all = builtIns.map { it.part.hittable }
         val room = if (world is HittableList && all.isNotEmpty()) {
@@ -264,7 +276,6 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
         } else world
         val parts = mutableListOf<Hittable>(room)
         builtIns.filter { it.enabled }.forEach { parts += it.part.hittable }
-        for (o in objects) parts += HittableList(o.placedMesh().toHittables(o.material.material()).toMutableList())
         return HittableList(parts)
     }
 
@@ -472,6 +483,15 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
      * meets the horizontal plane y = [floorY]; null when it points away from it.
      */
     private fun floorPoint(v: View, fx: Double, fy: Double, floorY: Double): DoubleArray? {
+        val (origin, direction) = cursorRay(v, fx, fy)
+        if (kotlin.math.abs(direction[1]) < 1e-9) return null
+        val t = (floorY - origin[1]) / direction[1]
+        if (t <= 0) return null
+        return DoubleArray(3) { origin[it] + t * direction[it] }
+    }
+
+    /** The camera's ray through the image point ([fx], [fy], as fractions of its width and height). */
+    private fun cursorRay(v: View, fx: Double, fy: Double): Pair<DoubleArray, DoubleArray> {
         val size = resolution
         val s = setup(v, size)
         val px = fx * size.width
@@ -482,11 +502,104 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
             (s.pixel00.z + s.pixelDeltaU.z * px + s.pixelDeltaV.z * py)
         )
         val origin = doubleArrayOf(s.cameraCenter.x.toDouble(), s.cameraCenter.y.toDouble(), s.cameraCenter.z.toDouble())
-        val direction = DoubleArray(3) { point[it] - origin[it] }
-        if (kotlin.math.abs(direction[1]) < 1e-9) return null
-        val t = (floorY - origin[1]) / direction[1]
+        return origin to DoubleArray(3) { point[it] - origin[it] }
+    }
+
+    /**
+     * Where [model] would stand if dropped under the panel point ([mouseX], [mouseY]): on the
+     * first surface the ray meets - the scene's own geometry, or the box around another added
+     * model - when that surface faces up (a floor, a block's top, a sphere's crown); on the floor
+     * (y = 0) under the cursor when it is a wall or a side. Null outside the image.
+     */
+    private fun dropPoint(model: PlacedObject, mouseX: Int, mouseY: Int): DoubleArray? {
+        val r = panel.imageBounds()
+        if (r.width <= 0 || r.height <= 0) return null
+        val fx = (mouseX - r.x).toDouble() / r.width
+        val fy = (mouseY - r.y).toDouble() / r.height
+        if (fx !in 0.0..1.0 || fy !in 0.0..1.0) return null
+        val v = view
+        val (origin, direction) = cursorRay(v, fx, fy)
+
+        var bestT = Double.POSITIVE_INFINITY
+        // The hit surface's normal, which way it faces.
+        var normal = doubleArrayOf(0.0, 1.0, 0.0)
+        val ray = Ray(
+            Point(origin[0].toFloat(), origin[1].toFloat(), origin[2].toFloat()),
+            Vector(direction[0].toFloat(), direction[1].toFloat(), direction[2].toFloat())
+        )
+        sceneWithoutModels().hit(ray, Interval(0.001f, Float.POSITIVE_INFINITY))?.let { hit ->
+            bestT = hit.t.toDouble()
+            val length = sqrt(hit.normal.x * hit.normal.x + hit.normal.y * hit.normal.y + hit.normal.z * hit.normal.z)
+            if (length > 0) normal = doubleArrayOf((hit.normal.x / length).toDouble(), (hit.normal.y / length).toDouble(), (hit.normal.z / length).toDouble())
+        }
+        for (other in objects) {
+            if (other === model) continue
+            val b = other.localBounds()
+            val min = doubleArrayOf(other.x + b[0], other.y + b[1], other.z + b[2])
+            val max = doubleArrayOf(other.x + b[3], other.y + b[4], other.z + b[5])
+            boxHit(origin, direction, min, max)?.let { (t, faceNormal) ->
+                if (t < bestT) {
+                    bestT = t
+                    normal = faceNormal
+                }
+            }
+        }
+
+        if (!bestT.isFinite()) return floorPoint(v, fx, fy, 0.0)
+        val hit = DoubleArray(3) { origin[it] + bestT * direction[it] }
+        if (normal[1] > UPWARD) return hit
+
+        // A wall or a side: stand at its foot on the floor, moved out along it by half the
+        // model's footprint so the two do not overlap.
+        val b = model.localBounds()
+        val halfFootprint = maxOf(-b[0], b[3], -b[2], b[5])
+        val flat = sqrt(normal[0] * normal[0] + normal[2] * normal[2]).coerceAtLeast(1e-9)
+        return doubleArrayOf(hit[0] + normal[0] / flat * halfFootprint, 0.0, hit[2] + normal[2] / flat * halfFootprint)
+    }
+
+    /** Entry distance of a ray into a box and the normal of the face it enters by; null on a miss. */
+    private fun boxHit(origin: DoubleArray, direction: DoubleArray, min: DoubleArray, max: DoubleArray): Pair<Double, DoubleArray>? {
+        var near = 0.0
+        var far = Double.POSITIVE_INFINITY
+        var nearAxis = -1
+        for (a in 0 until 3) {
+            if (kotlin.math.abs(direction[a]) < 1e-12) {
+                if (origin[a] < min[a] || origin[a] > max[a]) return null
+                continue
+            }
+            var t0 = (min[a] - origin[a]) / direction[a]
+            var t1 = (max[a] - origin[a]) / direction[a]
+            if (t0 > t1) t0 = t1.also { t1 = t0 }
+            if (t0 > near) {
+                near = t0
+                nearAxis = a
+            }
+            if (t1 < far) far = t1
+            if (far < near) return null
+        }
+        // The entry face is across the axis entered last, facing back towards the ray.
+        val normal = DoubleArray(3)
+        if (nearAxis >= 0) normal[nearAxis] = if (direction[nearAxis] > 0) -1.0 else 1.0
+        return near to normal
+    }
+
+    /** Where a world point lands in the image, in image pixels; null when it is behind the camera. */
+    private fun project(s: CameraSetup, p: DoubleArray): DoubleArray? {
+        val c = doubleArrayOf(s.cameraCenter.x.toDouble(), s.cameraCenter.y.toDouble(), s.cameraCenter.z.toDouble())
+        val du = doubleArrayOf(s.pixelDeltaU.x.toDouble(), s.pixelDeltaU.y.toDouble(), s.pixelDeltaU.z.toDouble())
+        val dv = doubleArrayOf(s.pixelDeltaV.x.toDouble(), s.pixelDeltaV.y.toDouble(), s.pixelDeltaV.z.toDouble())
+        val p00 = doubleArrayOf(s.pixel00.x.toDouble(), s.pixel00.y.toDouble(), s.pixel00.z.toDouble())
+        fun dot(a: DoubleArray, b: DoubleArray) = a[0] * b[0] + a[1] * b[1] + a[2] * b[2]
+        // The image plane holds pixel00 and is spanned by the pixel steps; meet it on the way to p.
+        val normal = doubleArrayOf(du[1] * dv[2] - du[2] * dv[1], du[2] * dv[0] - du[0] * dv[2], du[0] * dv[1] - du[1] * dv[0])
+        val d = DoubleArray(3) { p[it] - c[it] }
+        val denominator = dot(normal, d)
+        if (kotlin.math.abs(denominator) < 1e-12) return null
+        val t = dot(normal, DoubleArray(3) { p00[it] - c[it] }) / denominator
         if (t <= 0) return null
-        return DoubleArray(3) { origin[it] + t * direction[it] }
+        val onPlane = DoubleArray(3) { c[it] + t * d[it] - p00[it] }
+        // pixel00 is the centre of the first pixel, half a pixel in from the corner.
+        return doubleArrayOf(dot(onPlane, du) / dot(du, du) + 0.5, dot(onPlane, dv) / dot(dv, dv) + 0.5)
     }
 
     private fun show(image: BufferedImage, text: String) {
@@ -525,8 +638,7 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
                 lastY = e.y
                 placing = SwingUtilities.isLeftMouseButton(e) && e.isControlDown && selectedModel != null
                 if (placing) {
-                    placeMarker = e.point
-                    panel.repaint()
+                    updateGhost(e.x, e.y)
                     return
                 }
                 dragging = true
@@ -536,8 +648,8 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
             override fun mouseReleased(e: MouseEvent) {
                 if (placing) {
                     placing = false
-                    placeMarker = null
-                    place(e.x, e.y)
+                    updateGhost(e.x, e.y)
+                    dropGhost()
                     return
                 }
                 dragging = false
@@ -546,8 +658,7 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
 
             override fun mouseDragged(e: MouseEvent) {
                 if (placing) {
-                    placeMarker = e.point
-                    panel.repaint()
+                    updateGhost(e.x, e.y)
                     return
                 }
                 val dx = e.x - lastX
@@ -585,23 +696,63 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
                     KeyEvent.VK_MINUS, KeyEvent.VK_SUBTRACT -> { view = view.with(vfov = (view.vfov + 2).coerceAtMost(120.0)); touch() }
                     KeyEvent.VK_DELETE -> selected?.let { removeObject(it); controls.refreshObjects() }
                     KeyEvent.VK_F1, KeyEvent.VK_H -> HelpDialog.show(frame)
+                    KeyEvent.VK_LEFT, KeyEvent.VK_RIGHT, KeyEvent.VK_UP, KeyEvent.VK_DOWN,
+                    KeyEvent.VK_PAGE_UP, KeyEvent.VK_PAGE_DOWN, KeyEvent.VK_Q, KeyEvent.VK_E,
+                    KeyEvent.VK_OPEN_BRACKET, KeyEvent.VK_CLOSE_BRACKET -> nudge(e.keyCode, e.isShiftDown)
                     KeyEvent.VK_ESCAPE -> frame.dispose()
                 }
             }
         })
     }
 
-    /** Ctrl + click: the selected object moves to the floor under the cursor. */
-    private fun place(mouseX: Int, mouseY: Int) {
+    /** Ctrl + drag: where the selected model would land, shown as its box until the button is let go. */
+    private fun updateGhost(mouseX: Int, mouseY: Int) {
+        placeMarker = java.awt.Point(mouseX, mouseY)
+        ghost = selectedModel?.let { dropPoint(it, mouseX, mouseY) }
+        panel.repaint()
+    }
+
+    /** Ctrl + release: the selected model moves to where its box was shown. */
+    private fun dropGhost() {
+        val o = selectedModel
+        val target = ghost
+        ghost = null
+        placeMarker = null
+        panel.repaint()
+        if (o == null || target == null) return
+        o.x = target[0]
+        o.y = target[1]
+        o.z = target[2]
+        sceneChanged()
+        controls.refreshSelection()
+    }
+
+    /**
+     * Arrow keys move the selected model across the floor as the camera sees it - left, right,
+     * away, closer - PageUp / PageDown up and down, Q / E or [ / ] turn it; Shift takes five
+     * times the step.
+     */
+    private fun nudge(key: Int, big: Boolean) {
         val o = selectedModel ?: return
-        val r = panel.imageBounds()
-        if (r.width <= 0 || r.height <= 0) return
-        val fx = (mouseX - r.x).toDouble() / r.width
-        val fy = (mouseY - r.y).toDouble() / r.height
-        if (fx !in 0.0..1.0 || fy !in 0.0..1.0) return
-        val hit = floorPoint(view, fx, fy, o.y) ?: return
-        o.x = hit[0]
-        o.z = hit[2]
+        val step = defaultObjectHeight / 20 * (if (big) 5 else 1)
+        val v = view
+        // The camera's right and its forward direction, both flattened onto the floor.
+        val w = doubleArrayOf(cos(v.pitch) * sin(v.yaw), cos(v.pitch) * cos(v.yaw))
+        val length = sqrt(w[0] * w[0] + w[1] * w[1]).coerceAtLeast(1e-9)
+        val rightX = w[1] / length
+        val rightZ = -w[0] / length
+        val forwardX = -w[0] / length
+        val forwardZ = -w[1] / length
+        when (key) {
+            KeyEvent.VK_LEFT -> { o.x -= rightX * step; o.z -= rightZ * step }
+            KeyEvent.VK_RIGHT -> { o.x += rightX * step; o.z += rightZ * step }
+            KeyEvent.VK_UP -> { o.x += forwardX * step; o.z += forwardZ * step }
+            KeyEvent.VK_DOWN -> { o.x -= forwardX * step; o.z -= forwardZ * step }
+            KeyEvent.VK_PAGE_UP -> o.y += step
+            KeyEvent.VK_PAGE_DOWN -> o.y -= step
+            KeyEvent.VK_Q, KeyEvent.VK_OPEN_BRACKET -> o.rotation = ((o.rotation - TURN_STEP + 540) % 360) - 180
+            KeyEvent.VK_E, KeyEvent.VK_CLOSE_BRACKET -> o.rotation = ((o.rotation + TURN_STEP + 540) % 360) - 180
+        }
         sceneChanged()
         controls.refreshSelection()
     }
@@ -643,6 +794,38 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
             return java.awt.Rectangle(((width - w) / 2).toInt(), ((available - h) / 2).toInt(), w.toInt(), h.toInt())
         }
 
+        /** The dragged model's box, where it would land, drawn over the image in perspective. */
+        private fun drawGhost(g2: Graphics2D) {
+            val at = ghost ?: return
+            val model = selectedModel ?: return
+            val b = model.localBounds()
+            val s = setup(view, resolution)
+            val r = imageBounds()
+            val corners = (0 until 8).map { i ->
+                val p = doubleArrayOf(
+                    at[0] + if (i and 1 == 0) b[0] else b[3],
+                    at[1] + if (i and 2 == 0) b[1] else b[4],
+                    at[2] + if (i and 4 == 0) b[2] else b[5]
+                )
+                project(s, p)?.let { px ->
+                    java.awt.Point(
+                        (r.x + px[0] / resolution.width * r.width).toInt(),
+                        (r.y + px[1] / resolution.height * r.height).toInt()
+                    )
+                }
+            }
+            g2.color = Color(0xE8C547)
+            g2.stroke = BasicStroke(1.6f)
+            // The 12 edges: corners that differ in exactly one of the three bits.
+            for (i in 0 until 8) for (bit in intArrayOf(1, 2, 4)) {
+                val j = i or bit
+                if (j == i) continue
+                val a = corners[i] ?: continue
+                val c = corners[j] ?: continue
+                g2.drawLine(a.x, a.y, c.x, c.y)
+            }
+        }
+
         override fun paintComponent(g: Graphics) {
             super.paintComponent(g)
             val g2 = g as Graphics2D
@@ -651,6 +834,7 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
                 g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR)
                 g2.drawImage(image, r.x, r.y, r.width, r.height, null)
             }
+            drawGhost(g2)
             placeMarker?.let { p ->
                 g2.color = Color(0xE8C547)
                 g2.stroke = BasicStroke(2f)
@@ -684,6 +868,10 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
         private const val MAX_PITCH = 1.55
         private const val ZOOM_STEP = 1.1
         private const val DRAG_ZOOM = 0.02
+        /** How much a model turns per Q / E press, in degrees. */
+        private const val TURN_STEP = 15.0
+        /** A surface counts as one to stand on when its normal is within ~45 degrees of up. */
+        private const val UPWARD = 0.7
         private const val STATUS_HEIGHT = 44
         private const val HELP =
             "F1 / H: wszystkie skróty · LPM obrót · Shift+LPM przesuwanie · kółko zoom · Ctrl+LPM postaw obiekt · S zapis"
