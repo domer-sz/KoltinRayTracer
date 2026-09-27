@@ -383,7 +383,43 @@ object BookScenes {
 
         val world = scene.world as HittableList
         world.add(BvhNode(HittableList(mesh.toHittables(grey).toMutableList())))
+
+        // The lamp hangs above and slightly behind the model, which leaves its front dark.
+        // -Drt.fill=<f> adds a fill light like a photographer's: a panel outside the box, above
+        // the camera's view, aimed down at the model's face.
+        val fill = System.getProperty("rt.fill")?.toFloatOrNull() ?: 0.0f
+        if (fill > 0.0f) {
+            val panel = fillLight(fill)
+            world.add(panel)
+            scene.camera.lights = HittableList(mutableListOf(scene.camera.lights!!, panel))
+        }
         return SceneDefinition(name = "cornell-model", world = world, camera = scene.camera)
+    }
+
+    /**
+     * A 150x150 panel centred at (330, 560, -200) - out of frame, since the camera at z=-800
+     * sees only up to y~480 there - facing the model's face at about (360, 150, 170). Its
+     * brightness is set so that it lights that point with [strength] times the light the lamp
+     * gives it, going by area, distance and the panels' angles to it.
+     */
+    private fun fillLight(strength: Float): Quad {
+        val target = Vector(360f, 150f, 170f)
+        val centre = Vector(330f, 560f, -200f)
+        val towards = (target - centre).unit()
+        // Edges chosen so u x v points along [towards]: u across the room, v in the y/z plane.
+        val u = Vector(150f, 0f, 0f)
+        val v = Vector(0f, towards.z, -towards.y).unit() * 150f
+        val corner = centre - u * 0.5f - v * 0.5f
+
+        fun reach(position: Vector, normal: Vector, area: Float): Float {
+            val toTarget = target - position
+            val distance = toTarget.length()
+            return area * kotlin.math.abs(Vector.dotProduct(normal, toTarget)) / (distance * distance * distance)
+        }
+        val lamp = reach(Vector(278f, 554f, 279.5f), Vector(0f, -1f, 0f), 130f * 105f)
+        val panel = reach(centre, towards, 150f * 150f)
+        val radiance = 15f * strength * lamp / panel
+        return Quad(corner.toPoint(), u, v, DiffuseLight(Color(radiance, radiance, radiance)))
     }
 
     /** Height the model in [cornellModel] is scaled to: a little over half the tall block. */
