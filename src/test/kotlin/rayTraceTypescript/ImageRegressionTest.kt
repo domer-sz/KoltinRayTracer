@@ -8,6 +8,7 @@ import java.nio.file.Paths
 import java.util.zip.GZIPInputStream
 import java.util.zip.GZIPOutputStream
 import rayTraceTypescript.render.CpuRenderer
+import rayTraceTypescript.render.PpmWriter
 import rayTraceTypescript.utils.RandomSource
 
 class ImageRegressionTest {
@@ -54,6 +55,7 @@ class ImageRegressionTest {
             PpmSupport.parse(bytes)
         } finally {
             Files.deleteIfExists(tempFile)
+            Files.deleteIfExists(PpmWriter.pngPath(tempFile))
             RandomSource.reset()
         }
     }

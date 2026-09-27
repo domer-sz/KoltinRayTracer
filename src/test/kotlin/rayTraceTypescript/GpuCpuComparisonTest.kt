@@ -19,6 +19,7 @@ import rayTraceTypescript.objects.box
 import rayTraceTypescript.objects.Sphere
 import rayTraceTypescript.objects.Mesh
 import rayTraceTypescript.render.CpuRenderer
+import rayTraceTypescript.render.PpmWriter
 import rayTraceTypescript.render.Renderer
 import rayTraceTypescript.textures.CheckerTexture
 import rayTraceTypescript.textures.ImageTexture
@@ -139,6 +140,7 @@ class GpuCpuComparisonTest {
             PpmSupport.parse(Files.readAllBytes(target))
         } finally {
             Files.deleteIfExists(target)
+            Files.deleteIfExists(PpmWriter.pngPath(target))
             RandomSource.reset()
         }
     }
