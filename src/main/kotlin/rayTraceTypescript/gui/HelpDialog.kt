@@ -29,6 +29,7 @@ object HelpDialog {
             "Shift + strzałki, PageUp, PageDown" to "To samo, pięć razy większy krok",
             "Delete" to "Usuń zaznaczony obiekt (także kolumnę lub kulę sceny)",
             "Panel: Dodaj model…" to "Wczytaj STL, OBJ, PLY, OFF, glTF, GLB lub 3MF",
+            "Panel: Dodaj kulę / graniastosłup" to "Nowa kula (szklana) albo graniastosłup jak kolumna (biały); graniastosłup ma też szerokość i głębokość",
             "Panel: X, Y, Z, Obrót, Wysokość" to "Ustaw zaznaczony model",
             "Panel: Materiał - Gotowy" to "Szary, biały, czerwony, niebieski mat, szkło, diament, lustro, złoto, miedź, stal, świecący",
             "Panel: Materiał - Rodzaj, Kolor, parametr" to "Matowy, metal (chropowatość), szkło (wsp. załamania) lub świecący (moc)",

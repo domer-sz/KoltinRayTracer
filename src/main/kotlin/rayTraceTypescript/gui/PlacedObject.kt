@@ -7,7 +7,14 @@ import rayTraceTypescript.materials.DiffuseLight
 import rayTraceTypescript.materials.Lambertian
 import rayTraceTypescript.materials.Material
 import rayTraceTypescript.materials.Metal
+import rayTraceTypescript.Point
+import rayTraceTypescript.objects.Hittable
+import rayTraceTypescript.objects.HittableList
 import rayTraceTypescript.objects.Mesh
+import rayTraceTypescript.objects.RotateY
+import rayTraceTypescript.objects.Sphere
+import rayTraceTypescript.objects.Translate
+import rayTraceTypescript.objects.box
 import rayTraceTypescript.scenes.ScenePart
 
 /** An object listed in the viewer: part of the scene itself, or a model added there. */
@@ -87,44 +94,98 @@ enum class MaterialPreset(val label: String, val spec: MaterialSpec) {
     override fun toString() = label
 }
 
+/** What an added object is: a loaded model, or one of the shapes the scene's own objects have. */
+sealed interface Shape {
+    /** A mesh from a file. */
+    class Model(val mesh: Mesh) : Shape
+
+    /** A true sphere, [height] across. */
+    object Ball : Shape
+
+    /** A box with flat sides, like the Cornell box's column: [width] by [height] by [depth]. */
+    object Block : Shape
+}
+
 /**
- * A model added in the viewer: the mesh as loaded, and where and how it stands. [x], [y], [z]
- * are the middle of its footprint, [height] its size after scaling, [rotation] its turn about
- * the vertical in degrees.
+ * An object added in the viewer and where and how it stands. [x], [y], [z] are the middle of
+ * its footprint, [height] its size, [rotation] its turn about the vertical in degrees. A block
+ * also has its own [width] and [depth]; a model is scaled so its height is [height].
  */
-class PlacedObject(val name: String, private val mesh: Mesh) : SceneEntry {
+class PlacedObject(val name: String, val shape: Shape) : SceneEntry {
     @Volatile var x = 0.0
     @Volatile var y = 0.0
     @Volatile var z = 0.0
     @Volatile var rotation = 0.0
     @Volatile var height = 1.0
+    @Volatile var width = 0.5
+    @Volatile var depth = 0.5
     @Volatile var zUp = false
     @Volatile var material = MaterialPreset.GREY.spec
 
-    val triangleCount: Int get() = mesh.triangleCount
+    val isModel: Boolean get() = shape is Shape.Model
 
-    /** The mesh stood up, turned, scaled to [height] and moved to its place. */
-    fun placedMesh(): Mesh = shapedMesh()
-        .transformed(1.0f, Vector(0f, 0f, 0f), Vector(x.toFloat(), y.toFloat(), z.toFloat()))
+    /** A line about what the object is, for the panel. */
+    val description: String
+        get() = when (shape) {
+            is Shape.Model -> "%,d trójkątów".format(shape.mesh.triangleCount)
+            Shape.Ball -> "Kula"
+            Shape.Block -> "Graniastosłup"
+        }
+
+    /** The object as the renderer takes it, in its place and made of its material. */
+    fun hittable(): Hittable {
+        val m = material.material()
+        return when (shape) {
+            is Shape.Model -> HittableList(
+                shapedMesh(shape.mesh).transformed(1.0f, Vector(0f, 0f, 0f), Vector(x.toFloat(), y.toFloat(), z.toFloat()))
+                    .toHittables(m).toMutableList()
+            )
+            Shape.Ball -> Sphere(Point(x.toFloat(), (y + height / 2).toFloat(), z.toFloat()), (height / 2).toFloat(), m)
+            Shape.Block -> Translate(
+                RotateY(
+                    box(
+                        Point((-width / 2).toFloat(), 0f, (-depth / 2).toFloat()),
+                        Point((width / 2).toFloat(), height.toFloat(), (depth / 2).toFloat()),
+                        m
+                    ),
+                    rotation.toFloat()
+                ),
+                Vector(x.toFloat(), y.toFloat(), z.toFloat())
+            )
+        }
+    }
 
     /** The mesh stood up, turned and scaled, its footprint centred on the origin at y = 0. */
-    private fun shapedMesh(): Mesh = (if (zUp) mesh.zUpToYUp() else mesh)
+    private fun shapedMesh(mesh: Mesh): Mesh = (if (zUp) mesh.zUpToYUp() else mesh)
         .rotatedY(rotation.toFloat())
         .standingOnFloor(targetHeight = height.toFloat())
 
-    @Volatile private var boundsFor: Triple<Boolean, Double, Double>? = null
+    @Volatile private var boundsFor: List<Any>? = null
     @Volatile private var bounds = FloatArray(6)
 
     /**
-     * The model's box relative to its position (min x, y, z, max x, y, z), for drawing it while
-     * it is dragged and for standing other models on it. Worked out again only when the model is
-     * turned, resized or stood up differently.
+     * The object's box relative to its position (min x, y, z, max x, y, z), for drawing it while
+     * it is dragged and for standing other objects on it. Worked out again only when the object
+     * is turned, resized or stood up differently.
      */
     fun localBounds(): FloatArray {
-        val key = Triple(zUp, rotation, height)
+        val key = listOf(zUp, rotation, height, width, depth)
         if (key != boundsFor) {
-            val box = shapedMesh().bounds()
-            bounds = floatArrayOf(box.x.min, box.y.min, box.z.min, box.x.max, box.y.max, box.z.max)
+            bounds = when (shape) {
+                is Shape.Model -> shapedMesh(shape.mesh).bounds().let { box ->
+                    floatArrayOf(box.x.min, box.y.min, box.z.min, box.x.max, box.y.max, box.z.max)
+                }
+                Shape.Ball -> (height / 2).toFloat().let { r -> floatArrayOf(-r, 0f, -r, r, 2 * r, r) }
+                Shape.Block -> {
+                    // The turned footprint's reach along x and z.
+                    val a = Math.toRadians(rotation)
+                    val c = kotlin.math.abs(kotlin.math.cos(a))
+                    val s = kotlin.math.abs(kotlin.math.sin(a))
+                    val halfX = (width / 2 * c + depth / 2 * s).toFloat()
+                    val halfZ = (width / 2 * s + depth / 2 * c).toFloat()
+                    floatArrayOf(-halfX, 0f, -halfZ, halfX, height.toFloat(), halfZ)
+                }
+            }
             boundsFor = key
         }
         return bounds

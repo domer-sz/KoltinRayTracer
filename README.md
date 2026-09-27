@@ -83,9 +83,11 @@ w panelu i jest odszumiany przy 16, 64, 256… próbkach oraz na końcu.
   **Cel spp** (liczba próbek, przy której render się kończy) z paskiem postępu, odszumianie, zapis.
 - **Światła** – lampa sufitowa i światło przednie do włączania i wyłączania.
 - **Obiekty na scenie** – lista obiektów: kolumna i szklana kula sceny (można je usunąć i przywrócić
-  przyciskiem *Przywróć obiekty sceny*) oraz dodane modele. *Dodaj model…* wczytuje STL, OBJ, PLY,
-  OFF, glTF/GLB albo 3MF; zaznaczony model można ustawić polami X / Y / Z, obrotem, wysokością
-  i materiałem, albo postawić Ctrl + klikiem. Materiał to gotowy zestaw (szary, biały, czerwony
+  przyciskiem *Przywróć obiekty sceny*) oraz dodane obiekty. *Dodaj model…* wczytuje STL, OBJ, PLY,
+  OFF, glTF/GLB albo 3MF; *Dodaj kulę* i *Dodaj graniastosłup* wstawiają kolejną kulę (szklaną)
+  albo graniastosłup w proporcjach kolumny (biały, z własną szerokością i głębokością). Zaznaczony
+  obiekt można ustawić polami X / Y / Z, obrotem, wysokością i materiałem, przeciągnąć z Ctrl
+  albo przesuwać strzałkami. Materiał to gotowy zestaw (szary, biały, czerwony
   i niebieski mat, szkło, diament, lustro, złoto, miedź, stal szczotkowana, świecący biały) albo własny:
   rodzaj (matowy, metal, szkło, świecący), kolor z okna wyboru i parametr zależny od rodzaju
   (chropowatość metalu, współczynnik załamania szkła, moc światła).

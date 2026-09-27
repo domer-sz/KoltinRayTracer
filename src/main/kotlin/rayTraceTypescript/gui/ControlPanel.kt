@@ -74,6 +74,10 @@ class ControlPanel(private val viewer: Viewer, private val frame: JFrame) : JPan
     private val posZ = numberSpinner(step)
     private val turn = JSpinner(SpinnerNumberModel(0.0, -360.0, 360.0, 15.0))
     private val size = JSpinner(SpinnerNumberModel(viewer.defaultObjectHeight, 1e-3, 1e6, step))
+    private val addBall = JButton("Dodaj kulę")
+    private val addBlock = JButton("Dodaj graniastosłup")
+    private val blockWidth = JSpinner(SpinnerNumberModel(viewer.defaultObjectHeight / 2, 1e-3, 1e6, step))
+    private val blockDepth = JSpinner(SpinnerNumberModel(viewer.defaultObjectHeight / 2, 1e-3, 1e6, step))
     private val materialPreset = JComboBox<Any>((listOf<Any>(CUSTOM) + MaterialPreset.values()).toTypedArray())
     private val materialKind = JComboBox(MaterialKind.values())
     private val colour = JButton("Wybierz kolor…")
@@ -108,6 +112,10 @@ class ControlPanel(private val viewer: Viewer, private val frame: JFrame) : JPan
 
         section("Obiekty na scenie")
         full(add)
+        full(JPanel(GridBagLayout()).apply {
+            add(addBall, GridBagConstraints().apply { weightx = 1.0; fill = GridBagConstraints.HORIZONTAL; insets = Insets(0, 0, 0, 4) })
+            add(addBlock, GridBagConstraints().apply { weightx = 1.0; fill = GridBagConstraints.HORIZONTAL })
+        })
         full(JScrollPane(list).apply { preferredSize = Dimension(250, 110); minimumSize = Dimension(250, 110) })
         full(JPanel(GridBagLayout()).apply {
             add(remove, GridBagConstraints().apply { weightx = 1.0; fill = GridBagConstraints.HORIZONTAL; insets = Insets(0, 0, 0, 4) })
@@ -118,7 +126,9 @@ class ControlPanel(private val viewer: Viewer, private val frame: JFrame) : JPan
         field("Z", posZ)
         field("Obrót [°]", turn)
         field("Wysokość", size)
-        section("Materiał zaznaczonego modelu")
+        field("Szerokość", blockWidth)
+        field("Głębokość", blockDepth)
+        section("Materiał zaznaczonego obiektu")
         field("Gotowy", materialPreset)
         field("Rodzaj", materialKind)
         field("Kolor", colour)
@@ -126,7 +136,7 @@ class ControlPanel(private val viewer: Viewer, private val frame: JFrame) : JPan
         full(zUp)
         full(info)
         if (viewer.builtIns.any { !it.part.isLight }) full(restore)
-        full(JLabel("<html><small>Ctrl + klik w obraz stawia zaznaczony obiekt na podłodze w tym miejscu.</small></html>"))
+        full(JLabel("<html><small>Ctrl + przeciąganie przestawia zaznaczony obiekt, strzałki go przesuwają (F1: wszystkie skróty).</small></html>"))
         add(JPanel(), GridBagConstraints().apply { gridy = row++; weighty = 1.0 })
 
         preset.addActionListener {
@@ -182,6 +192,10 @@ class ControlPanel(private val viewer: Viewer, private val frame: JFrame) : JPan
         }
         parameter.addChangeListener { edit { o -> o.material = o.material.copy(parameter = parameter.value as Double) } }
         zUp.addActionListener { edit { o -> o.zUp = zUp.isSelected } }
+        blockWidth.addChangeListener { edit { o -> o.width = blockWidth.value as Double } }
+        blockDepth.addChangeListener { edit { o -> o.depth = blockDepth.value as Double } }
+        addBall.addActionListener { viewer.addShape(Shape.Ball); refreshObjects() }
+        addBlock.addActionListener { viewer.addShape(Shape.Block); refreshObjects() }
         refreshObjects()
     }
 
@@ -228,6 +242,10 @@ class ControlPanel(private val viewer: Viewer, private val frame: JFrame) : JPan
         syncing = true
         remove.isEnabled = viewer.selected != null
         modelFields.forEach { it.isEnabled = o != null }
+        // Only a loaded model can be stood up from z; only a block has its own width and depth.
+        zUp.isEnabled = o?.isModel == true
+        blockWidth.isEnabled = o?.shape == Shape.Block
+        blockDepth.isEnabled = o?.shape == Shape.Block
         restore.isEnabled = viewer.builtIns.any { !it.part.isLight && !it.enabled }
         if (viewer.selected is BuiltInObject) {
             info.text = "Obiekt sceny - można go tylko usunąć"
@@ -239,7 +257,9 @@ class ControlPanel(private val viewer: Viewer, private val frame: JFrame) : JPan
             size.value = o.height
             showMaterial(o.material)
             zUp.isSelected = o.zUp
-            info.text = "%,d trójkątów".format(o.triangleCount)
+            blockWidth.value = o.width
+            blockDepth.value = o.depth
+            info.text = o.description
         } else {
             info.text = if (viewer.entries().isEmpty()) "Scena jest pusta" else "Zaznacz obiekt na liście"
         }

@@ -198,7 +198,7 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
             try {
                 val mesh = MeshLoader.load(file.toPath())
                 val extension = file.extension.lowercase()
-                val placed = PlacedObject(file.nameWithoutExtension, mesh).apply {
+                val placed = PlacedObject(file.nameWithoutExtension, Shape.Model(mesh)).apply {
                     // Files made for 3D printing stand on z; the rest mostly use y as up.
                     zUp = extension == "stl" || extension == "3mf"
                     x = defaultObjectPosition[0]
@@ -217,6 +217,28 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
     }
 
     /** Takes [entry] out: an added model for good, one of the scene's own until [restoreBuiltIns]. */
+    /**
+     * Adds a sphere (glass, like the scene's) or a block (white, shaped like the column: twice
+     * as tall as wide) in the middle of the scene, sized like a newly loaded model.
+     */
+    fun addShape(shape: Shape): PlacedObject {
+        val ball = shape == Shape.Ball
+        val number = objects.count { it.shape === shape } + 1
+        val placed = PlacedObject(if (ball) "Kula $number" else "Graniastosłup $number", shape).apply {
+            x = defaultObjectPosition[0]
+            y = defaultObjectPosition[1]
+            z = defaultObjectPosition[2]
+            height = defaultObjectHeight
+            width = defaultObjectHeight / 2
+            depth = defaultObjectHeight / 2
+            material = if (ball) MaterialPreset.GLASS.spec else MaterialPreset.WHITE.spec
+        }
+        objects += placed
+        selected = placed
+        sceneChanged()
+        return placed
+    }
+
     fun removeObject(entry: SceneEntry) {
         when (entry) {
             is PlacedObject -> objects -= entry
@@ -263,7 +285,7 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
      */
     private fun buildWorld(): Hittable {
         val parts = mutableListOf<Hittable>(sceneWithoutModels())
-        for (o in objects) parts += HittableList(o.placedMesh().toHittables(o.material.material()).toMutableList())
+        for (o in objects) parts += o.hittable()
         return HittableList(parts)
     }
 
