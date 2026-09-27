@@ -373,7 +373,11 @@ object BookScenes {
         width: Int = 600
     ): SceneDefinition {
         val scene = cornellFinal(samples, width)
-        val grey = Lambertian(Color(0.45f, 0.45f, 0.45f))
+        // -Drt.model.material=glass makes the model glass, like the sphere; matte grey otherwise.
+        val material: Material = when (System.getProperty("rt.model.material")) {
+            "glass" -> Dielectric(1.5f)
+            else -> Lambertian(Color(0.45f, 0.45f, 0.45f))
+        }
         val mesh = MeshLoader.load(path)
             .zUpToYUp()
             .rotatedY(turnDegrees)
@@ -382,7 +386,7 @@ object BookScenes {
         println("Loaded ${mesh.triangleCount} triangles from $path")
 
         val world = scene.world as HittableList
-        world.add(BvhNode(HittableList(mesh.toHittables(grey).toMutableList())))
+        world.add(BvhNode(HittableList(mesh.toHittables(material).toMutableList())))
 
         // The lamp hangs above and slightly behind the model, which leaves its front dark.
         // -Drt.fill=<f> adds a fill light like a photographer's: a panel outside the box, above
