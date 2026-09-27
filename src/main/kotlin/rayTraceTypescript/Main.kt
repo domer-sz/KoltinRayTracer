@@ -37,6 +37,13 @@ fun main() {
     // -Drt.out redirects the render, so a quick look does not overwrite the committed image.ppm.
     val output = java.nio.file.Paths.get(System.getProperty("rt.out", "image.ppm"))
 
+    // -Drt.gui opens the scene in a window to steer the camera with the mouse; S there saves
+    // beside where -Drt.out points.
+    if (System.getProperty("rt.gui") != null) {
+        rayTraceTypescript.gui.Viewer(scene, output.toAbsolutePath().parent).run()
+        return
+    }
+
     var numberOfRays: Long = 0
     val time = measureTimeMillis {
         numberOfRays = scene.camera.render(scene.world, output)
