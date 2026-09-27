@@ -18,6 +18,9 @@ fun main() {
     // -Drt.seed pins every random draw - the scene's layout and the render's samples - so two
     // runs, or two versions of the renderer, can be compared image to image.
     System.getProperty("rt.seed")?.toLongOrNull()?.let { rayTraceTypescript.utils.RandomSource.withSeed(it) }
+    // Renders from the command line are denoised unless -Drt.denoise=off. The renderer itself
+    // only denoises when asked, so tests and other callers keep getting the raw image.
+    if (System.getProperty("rt.denoise") == null) System.setProperty("rt.denoise", "on")
     val scene =BookScenes.byName(System.getProperty("rt.scene", "earth"))
     // The books' final scenes are quoted at sample counts that take hours; these let a scene
     // be scaled down without editing it.

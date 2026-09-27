@@ -4,7 +4,7 @@
 2.5.1, taken unchanged from the official release `oidn-2.5.1.x64.windows.zip`: the four DLLs the
 CPU device needs, the OIDN licence (Apache 2.0) and the oneTBB third-party notice.
 
-`render/Denoiser` loads them from here when a render runs with `-Drt.denoise`; `-Drt.oidn=<dir>`
+`render/Denoiser` loads them from here for every render started from `Main` (unless `-Drt.denoise=off`); `-Drt.oidn=<dir>`
 or the `OIDN_DIR` environment variable point it at another copy instead. Nothing is installed
 or registered on the machine.
 
