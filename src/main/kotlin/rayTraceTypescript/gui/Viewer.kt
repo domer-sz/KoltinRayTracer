@@ -5,10 +5,14 @@ import rayTraceTypescript.Point
 import rayTraceTypescript.gpu.GpuRenderer
 import rayTraceTypescript.gpu.GpuSession
 import rayTraceTypescript.gpu.SceneFlattener
+import rayTraceTypescript.objects.Hittable
+import rayTraceTypescript.objects.HittableList
+import rayTraceTypescript.objects.MeshLoader
 import rayTraceTypescript.render.CameraSetup
 import rayTraceTypescript.render.Denoiser
 import rayTraceTypescript.render.PpmWriter
 import rayTraceTypescript.scenes.SceneDefinition
+import java.awt.BasicStroke
 import java.awt.BorderLayout
 import java.awt.Color
 import java.awt.Dimension
@@ -25,10 +29,13 @@ import java.awt.event.WindowAdapter
 import java.awt.event.WindowEvent
 import java.awt.image.BufferedImage
 import java.awt.image.DataBufferInt
+import java.io.File
 import java.nio.file.Path
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
+import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
+import java.util.concurrent.atomic.AtomicInteger
 import javax.swing.JFrame
 import javax.swing.JPanel
 import javax.swing.SwingUtilities
@@ -44,25 +51,36 @@ import kotlin.math.tan
  *  - left drag orbits the camera around the point it looks at,
  *  - Shift + left drag, or middle drag, pans,
  *  - the wheel, or right drag, moves the camera in and out,
+ *  - Ctrl + left click stands the selected object on the floor under the cursor,
  *  - R resets the view, D toggles denoising, S saves the image, + / - change the field of view.
+ * The panel beside the image ([ControlPanel]) sets the resolution and the sample target, and
+ * adds, places and dresses models loaded from any format [MeshLoader] reads.
  *
  * While the camera moves it renders a quarter-size image at one sample per pixel, so motion
- * stays fluid; once it stops it renders the full image, adding samples for as long as the view
- * holds still, and (with D on) denoises it every time the sample count quadruples.
+ * stays fluid; once it stops it renders the full image up to the sample target, denoising
+ * every time the sample count quadruples and once more at the end.
  */
 class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
     private val base: Camera = scene.camera
 
     /** The camera as an orbit around [target]; everything the mouse changes. Compared by identity. */
-    private data class View(
-        val target: DoubleArray, val yaw: Double, val pitch: Double, val radius: Double, val vfov: Double
-    ) {
+    private class View(val target: DoubleArray, val yaw: Double, val pitch: Double, val radius: Double, val vfov: Double) {
         val from: DoubleArray
             get() = doubleArrayOf(
                 target[0] + radius * cos(pitch) * sin(yaw),
                 target[1] + radius * sin(pitch),
                 target[2] + radius * cos(pitch) * cos(yaw)
             )
+
+        fun with(
+            target: DoubleArray = this.target, yaw: Double = this.yaw, pitch: Double = this.pitch,
+            radius: Double = this.radius, vfov: Double = this.vfov
+        ) = View(target, yaw, pitch, radius, vfov)
+    }
+
+    /** Output size in pixels. */
+    data class Resolution(val width: Int, val height: Int) {
+        val pixels: Int get() = width * height
     }
 
     private val initialView: View = run {
@@ -75,27 +93,49 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
         View(doubleArrayOf(at.x.toDouble(), at.y.toDouble(), at.z.toDouble()), atan2(dx, dz), asin(dy / radius), radius, base.vfov.toDouble())
     }
 
+    val sceneResolution = Resolution(base.imageWidth, base.initialize().imageHeight)
+
     @Volatile private var view = initialView
+    @Volatile var resolution = sceneResolution
+        set(value) { field = value; touch() }
+    @Volatile var targetSamples = maxOf(base.samplesPerPixel, DEFAULT_TARGET)
+    @Volatile var denoiseOn = true
     @Volatile private var lastInput = 0L
     @Volatile private var dragging = false
     @Volatile private var running = true
-    @Volatile private var denoiseOn = true
     @Volatile private var saveRequested = false
+
+    /** Models added in this window; editing one bumps [sceneVersion] so the GPU copy is rebuilt. */
+    val objects = CopyOnWriteArrayList<PlacedObject>()
+    private val sceneVersion = AtomicInteger(0)
+    @Volatile private var lastSceneEdit = 0L
+    @Volatile var selected: PlacedObject? = null
 
     @Volatile private var shown: BufferedImage? = null
     @Volatile private var status = "Przygotowuję scenę…"
+    @Volatile private var placeMarker: java.awt.Point? = null
     private val panel = ImagePanel()
+    private lateinit var controls: ControlPanel
+
+    /** A size fitting what the camera sees at the start: a quarter of the frame's height. */
+    val defaultObjectHeight: Double = 0.25 * 2.0 * initialView.radius * tan(Math.toRadians(initialView.vfov / 2))
+
+    /** Where new objects stand: the middle of the scene's footprint, on y = 0. */
+    private val defaultObjectPosition: DoubleArray = scene.world.aabbBoundingBox().let { box ->
+        doubleArrayOf(((box.x.min + box.x.max) / 2).toDouble(), 0.0, ((box.z.min + box.z.max) / 2).toDouble())
+    }
 
     /** Opens the window and blocks until it is closed. */
     fun run() {
         val closed = CountDownLatch(1)
-        val fullWidth = base.imageWidth
-        val fullSetup = setup(initialView, fullWidth)
         SwingUtilities.invokeLater {
             val frame = JFrame("Ray tracer - ${scene.name}")
             frame.defaultCloseOperation = JFrame.DISPOSE_ON_CLOSE
-            panel.preferredSize = Dimension(fullSetup.imageWidth, fullSetup.imageHeight + STATUS_HEIGHT)
+            controls = ControlPanel(this, frame)
+            val display = fit(sceneResolution)
+            panel.preferredSize = Dimension(display.width, display.height + STATUS_HEIGHT)
             frame.contentPane.add(panel, BorderLayout.CENTER)
+            frame.contentPane.add(controls, BorderLayout.EAST)
             frame.pack()
             frame.setLocationRelativeTo(null)
             frame.addWindowListener(object : WindowAdapter() {
@@ -111,31 +151,114 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
             frame.toFront()
             frame.isAlwaysOnTop = false
             panel.requestFocusInWindow()
+            // -Drt.gui.models=a.stl;b.obj opens the window with those models already placed.
+            System.getProperty("rt.gui.models")?.split(';')?.filter { it.isNotBlank() }?.forEach { path ->
+                addModel(File(path.trim())) { _, error ->
+                    if (error != null) System.err.println("[viewer] could not load $path: $error")
+                    controls.refreshObjects()
+                }
+            }
         }
-        val renderThread = Thread({ renderLoop(fullWidth) }, "viewer-render").apply { start() }
+        val renderThread = Thread({ renderLoop() }, "viewer-render").apply { start() }
         closed.await()
         renderThread.join()
     }
 
-    private fun renderLoop(fullWidth: Int) {
+    /** The window's first size: the image at most 900 pixels tall and 1200 wide on screen. */
+    private fun fit(r: Resolution): Dimension {
+        val scale = minOf(1.0, 900.0 / r.height, 1200.0 / r.width)
+        return Dimension((r.width * scale).toInt(), (r.height * scale).toInt())
+    }
+
+    // ------------------------------------------------------------------ scene edits (UI thread)
+
+    /** Loads [file] off the UI thread, then adds it standing in the middle of the scene. */
+    fun addModel(file: File, onDone: (PlacedObject?, String?) -> Unit) {
+        status = "Wczytuję ${file.name}…"
+        panel.repaint()
+        Thread({
+            try {
+                val mesh = MeshLoader.load(file.toPath())
+                val extension = file.extension.lowercase()
+                val placed = PlacedObject(file.nameWithoutExtension, mesh).apply {
+                    // Files made for 3D printing stand on z; the rest mostly use y as up.
+                    zUp = extension == "stl" || extension == "3mf"
+                    x = defaultObjectPosition[0]
+                    y = defaultObjectPosition[1]
+                    z = defaultObjectPosition[2]
+                    height = defaultObjectHeight
+                }
+                objects += placed
+                selected = placed
+                sceneChanged()
+                SwingUtilities.invokeLater { onDone(placed, null) }
+            } catch (t: Throwable) {
+                SwingUtilities.invokeLater { onDone(null, t.message ?: t.toString()) }
+            }
+        }, "viewer-load").apply { isDaemon = true; start() }
+    }
+
+    fun removeObject(o: PlacedObject) {
+        objects -= o
+        if (selected === o) selected = null
+        sceneChanged()
+    }
+
+    /** Stands [o] where the middle of the view meets its floor level, or under the view's target. */
+    fun centreInView(o: PlacedObject) {
+        val v = view
+        val hit = floorPoint(v, 0.5, 0.5, o.y) ?: doubleArrayOf(v.target[0], o.y, v.target[2])
+        o.x = hit[0]
+        o.z = hit[2]
+        sceneChanged()
+    }
+
+    fun sceneChanged() {
+        lastSceneEdit = System.currentTimeMillis()
+        sceneVersion.incrementAndGet()
+    }
+
+    fun requestSave() {
+        saveRequested = true
+    }
+
+    // ------------------------------------------------------------------ rendering (render thread)
+
+    private fun buildWorld(): Hittable {
+        val parts = mutableListOf<Hittable>(scene.world)
+        for (o in objects) parts += HittableList(o.placedMesh().toHittables(o.finish.material()).toMutableList())
+        return HittableList(parts)
+    }
+
+    private fun renderLoop() {
+        var session: GpuSession? = null
         try {
-            val flattened = SceneFlattener.flatten(scene.world, base.lights)
-            val denoiser = GpuRenderer.requestedDenoiser()
-            val full = setup(view, fullWidth)
-            GpuSession(flattened, full.totalPixels).use { session ->
-                denoiser.use { loop(session, it, fullWidth) }
+            GpuRenderer.requestedDenoiser().use { denoiser ->
+                loop(denoiser) { pixels ->
+                    session?.close()
+                    session = null
+                    status = "Przygotowuję scenę (dodane obiekty: ${objects.size})…"
+                    panel.repaint()
+                    GpuSession(SceneFlattener.flatten(buildWorld(), base.lights), pixels).also { session = it }
+                }
             }
         } catch (t: Throwable) {
             status = "Błąd: ${t.message}"
             panel.repaint()
             t.printStackTrace()
+        } finally {
+            session?.close()
         }
     }
 
-    private fun loop(session: GpuSession, denoiser: Denoiser?, fullWidth: Int) {
-        val previewWidth = maxOf(fullWidth / PREVIEW_DIVISOR, 64)
+    private fun loop(denoiser: Denoiser?, open: (Int) -> GpuSession) {
+        var session: GpuSession? = null
+        var builtVersion = -1
+        var sessionPixels = 0
+
         var accumulated: View? = null
-        var fullSetup: CameraSetup? = null
+        var accumulatedSize: Resolution? = null
+        var setup: CameraSetup? = null
         var pixels = FloatArray(0)
         var samples = 0
         var slice = 1
@@ -143,63 +266,84 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
         var nextDenoise = FIRST_DENOISE
         var guides: Pair<FloatArray, FloatArray>? = null
         var denoised: FloatArray? = null
+        var finalDenoiseDone = false
         var rateSamples = 0L
         var rateStart = System.nanoTime()
 
         while (running) {
+            val size = resolution
+            val version = sceneVersion.get()
+            // Rebuild the GPU copy when the objects changed (once edits pause) or the image outgrew it.
+            val sceneStale = version != builtVersion && System.currentTimeMillis() - lastSceneEdit > REBUILD_DELAY_MS
+            if (session == null || sceneStale || size.pixels > sessionPixels) {
+                sessionPixels = maxOf(size.pixels, sceneResolution.pixels)
+                session = open(sessionPixels)
+                builtVersion = version
+                accumulated = null
+            }
+
             val current = view
             val moving = dragging || System.currentTimeMillis() - lastInput < SETTLE_MS
             if (moving) {
                 // Quarter size, one fresh sample: rough, but it follows the mouse.
-                val setup = setup(current, previewWidth)
+                val preview = Resolution(maxOf(size.width / PREVIEW_DIVISOR, 32), maxOf(size.height / PREVIEW_DIVISOR, 32))
+                val previewSetup = setup(current, preview)
                 val frameStart = System.nanoTime()
-                session.setCamera(setup)
+                session.setCamera(previewSetup)
                 // Always from sample 0: a launch starting later adds to the buffer instead of
                 // replacing it. The noise then holds still between frames, which reads better.
-                session.launch(GpuSession.MODE_IMAGE, setup, 0, PREVIEW_SAMPLES, 1.0f / PREVIEW_SAMPLES)
-                val preview = FloatArray(setup.totalPixels * 3).also { session.read(GpuSession.IMAGE, it) }
-                show(toImage(preview, setup.imageWidth, setup.imageHeight, 1.0f), "podgląd ${setup.imageWidth}×${setup.imageHeight}, $PREVIEW_SAMPLES spp")
+                session.launch(GpuSession.MODE_IMAGE, previewSetup, 0, PREVIEW_SAMPLES, 1.0f / PREVIEW_SAMPLES)
+                val image = FloatArray(previewSetup.totalPixels * 3).also { session.read(GpuSession.IMAGE, it) }
+                show(
+                    toImage(image, previewSetup.imageWidth, previewSetup.imageHeight, 1.0f),
+                    "podgląd ${previewSetup.imageWidth}×${previewSetup.imageHeight}, $PREVIEW_SAMPLES spp"
+                )
                 accumulated = null
                 val frameMs = (System.nanoTime() - frameStart) / 1_000_000
                 if (frameMs < FRAME_MS) Thread.sleep(FRAME_MS - frameMs)
                 continue
             }
 
-            if (current !== accumulated) {
-                fullSetup = setup(current, fullWidth)
-                session.setCamera(fullSetup)
-                pixels = FloatArray(fullSetup.totalPixels * 3)
+            if (current !== accumulated || size != accumulatedSize) {
+                setup = setup(current, size)
+                session.setCamera(setup)
+                pixels = FloatArray(setup.totalPixels * 3)
                 accumulated = current
+                accumulatedSize = size
                 samples = 0
                 slice = 1
                 nextDenoise = FIRST_DENOISE
                 guides = null
                 denoised = null
+                finalDenoiseDone = false
                 rateSamples = 0
                 rateStart = System.nanoTime()
             }
-            val setup = fullSetup!!
-            if (samples >= MAX_SAMPLES) {
-                if (saveRequested) save(setup, pixels, samples, denoised)
-                Thread.sleep(FRAME_MS)
-                continue
-            }
+            val s = setup!!
+            val target = targetSamples
 
-            // The sum of all samples so far; the display divides by their count.
-            val launchStart = System.nanoTime()
-            session.launch(GpuSession.MODE_IMAGE, setup, samples, slice, 1.0f)
-            val launchMs = maxOf((System.nanoTime() - launchStart) / 1_000_000.0, 1.0)
-            samples += slice
-            rateSamples += slice.toLong() * setup.totalPixels
-            slice = (slice * LAUNCH_MS / launchMs).toInt().coerceIn(1, slice * 2)
+            if (samples < target) {
+                // The sum of all samples so far; the display divides by their count.
+                val count = minOf(slice, target - samples)
+                val launchStart = System.nanoTime()
+                session.launch(GpuSession.MODE_IMAGE, s, samples, count, 1.0f)
+                val launchMs = maxOf((System.nanoTime() - launchStart) / 1_000_000.0, 1.0)
+                samples += count
+                rateSamples += count.toLong() * s.totalPixels
+                slice = (count * LAUNCH_MS / launchMs).toInt().coerceIn(1, count * 2)
+            }
+            val done = samples >= target
 
             val now = System.nanoTime()
-            if (denoiser != null && denoiseOn && samples >= nextDenoise) {
+            val denoiseNow = denoiser != null && denoiseOn &&
+                ((samples >= nextDenoise && !done) || (done && !finalDenoiseDone))
+            if (denoiseNow) {
                 session.read(GpuSession.IMAGE, pixels)
-                val guidePair = guides ?: renderGuides(session, setup).also { guides = it }
+                val guidePair = guides ?: renderGuides(session, s).also { guides = it }
                 val average = FloatArray(pixels.size) { pixels[it] / samples }
-                denoised = denoiser.denoise(setup.imageWidth, setup.imageHeight, average, guidePair.first, guidePair.second)
-                nextDenoise *= 4
+                denoised = denoiser!!.denoise(s.imageWidth, s.imageHeight, average, guidePair.first, guidePair.second)
+                while (nextDenoise <= samples) nextDenoise *= 4
+                if (done) finalDenoiseDone = true
                 lastShown = 0
             }
             if (now - lastShown > DISPLAY_INTERVAL_NS || saveRequested) {
@@ -207,18 +351,22 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
                 val seconds = (now - rateStart) / 1e9
                 val rate = if (seconds > 0) rateSamples / seconds / 1e6 else 0.0
                 val cleanShown = denoiseOn && denoised != null
-                val image = if (cleanShown) toImage(denoised!!, setup.imageWidth, setup.imageHeight, 1.0f)
-                else toImage(pixels, setup.imageWidth, setup.imageHeight, 1.0f / samples)
+                val image = if (cleanShown) toImage(denoised!!, s.imageWidth, s.imageHeight, 1.0f)
+                else toImage(pixels, s.imageWidth, s.imageHeight, 1.0f / samples)
                 val denoiseNote = when {
                     denoiser == null -> "bez odszumiania (brak OIDN)"
                     !denoiseOn -> "odszumianie wył."
+                    cleanShown && done -> "odszumione, gotowe"
                     cleanShown -> "odszumione"
-                    else -> "odszumię przy $nextDenoise spp"
+                    else -> "odszumię przy ${minOf(nextDenoise, target)} spp"
                 }
-                show(image, "$samples spp · %.1f M próbek/s · $denoiseNote".format(rate))
+                val speed = if (done) "" else " · %.1f M próbek/s".format(rate)
+                show(image, "${s.imageWidth}×${s.imageHeight} · $samples / $target spp$speed · $denoiseNote")
+                SwingUtilities.invokeLater { if (::controls.isInitialized) controls.showProgress(samples, target) }
                 lastShown = now
-                if (saveRequested) save(setup, pixels, samples, if (cleanShown) denoised else null)
+                if (saveRequested) save(s, pixels, samples, if (cleanShown) denoised else null)
             }
+            if (done) Thread.sleep(FRAME_MS)
         }
     }
 
@@ -239,15 +387,17 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
         if (denoised != null) {
             PpmWriter.write(path.resolveSibling("viewer-${scene.name}-$stamp-denoised.ppm"), setup.imageWidth, setup.imageHeight, denoised)
         }
+        status = "Zapisano ${path.fileName} ($samples spp)"
         System.err.println("[viewer] saved $path ($samples spp)")
     }
 
-    /** The scene's own camera, moved to [view] and sized [width] pixels across. */
-    private fun setup(view: View, width: Int): CameraSetup {
+    /** The scene's own camera, moved to [view] and sized to [size]. */
+    private fun setup(view: View, size: Resolution): CameraSetup {
         val from = view.from
         val camera = Camera().apply {
-            aspectRatio = base.aspectRatio
-            imageWidth = width
+            // A quarter pixel over the height keeps the camera's floor(width / aspect) at size.height.
+            aspectRatio = size.width / (size.height + 0.25f)
+            imageWidth = size.width
             samplesPerPixel = base.samplesPerPixel
             maxReflectionDepth = base.maxReflectionDepth
             vfov = view.vfov.toFloat()
@@ -261,6 +411,28 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
             lights = base.lights
         }
         return camera.initialize()
+    }
+
+    /**
+     * Where the ray through the image point ([fx], [fy], as fractions of its width and height)
+     * meets the horizontal plane y = [floorY]; null when it points away from it.
+     */
+    private fun floorPoint(v: View, fx: Double, fy: Double, floorY: Double): DoubleArray? {
+        val size = resolution
+        val s = setup(v, size)
+        val px = fx * size.width
+        val py = fy * size.height
+        val point = doubleArrayOf(
+            (s.pixel00.x + s.pixelDeltaU.x * px + s.pixelDeltaV.x * py),
+            (s.pixel00.y + s.pixelDeltaU.y * px + s.pixelDeltaV.y * py),
+            (s.pixel00.z + s.pixelDeltaU.z * px + s.pixelDeltaV.z * py)
+        )
+        val origin = doubleArrayOf(s.cameraCenter.x.toDouble(), s.cameraCenter.y.toDouble(), s.cameraCenter.z.toDouble())
+        val direction = DoubleArray(3) { point[it] - origin[it] }
+        if (kotlin.math.abs(direction[1]) < 1e-9) return null
+        val t = (floorY - origin[1]) / direction[1]
+        if (t <= 0) return null
+        return DoubleArray(3) { origin[it] + t * direction[it] }
     }
 
     private fun show(image: BufferedImage, text: String) {
@@ -285,25 +457,45 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
         return image
     }
 
+    // ------------------------------------------------------------------ mouse and keys
+
     private fun installControls(frame: JFrame) {
         val mouse = object : MouseAdapter() {
             private var lastX = 0
             private var lastY = 0
+            private var placing = false
 
             override fun mousePressed(e: MouseEvent) {
+                panel.requestFocusInWindow()
                 lastX = e.x
                 lastY = e.y
+                placing = SwingUtilities.isLeftMouseButton(e) && e.isControlDown && selected != null
+                if (placing) {
+                    placeMarker = e.point
+                    panel.repaint()
+                    return
+                }
                 dragging = true
-                panel.requestFocusInWindow()
                 touch()
             }
 
             override fun mouseReleased(e: MouseEvent) {
+                if (placing) {
+                    placing = false
+                    placeMarker = null
+                    place(e.x, e.y)
+                    return
+                }
                 dragging = false
                 touch()
             }
 
             override fun mouseDragged(e: MouseEvent) {
+                if (placing) {
+                    placeMarker = e.point
+                    panel.repaint()
+                    return
+                }
                 val dx = e.x - lastX
                 val dy = e.y - lastY
                 lastX = e.x
@@ -311,8 +503,8 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
                 val v = view
                 view = when {
                     SwingUtilities.isMiddleMouseButton(e) || (SwingUtilities.isLeftMouseButton(e) && e.isShiftDown) -> pan(v, dx, dy)
-                    SwingUtilities.isRightMouseButton(e) -> v.copy(radius = dolly(v.radius, dy * DRAG_ZOOM))
-                    else -> v.copy(
+                    SwingUtilities.isRightMouseButton(e) -> v.with(radius = dolly(v.radius, dy * DRAG_ZOOM))
+                    else -> v.with(
                         yaw = v.yaw - dx * ORBIT_SPEED,
                         pitch = (v.pitch + dy * ORBIT_SPEED).coerceIn(-MAX_PITCH, MAX_PITCH)
                     )
@@ -321,7 +513,7 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
             }
 
             override fun mouseWheelMoved(e: MouseWheelEvent) {
-                view = view.copy(radius = dolly(view.radius, e.preciseWheelRotation))
+                view = view.with(radius = dolly(view.radius, e.preciseWheelRotation))
                 touch()
             }
         }
@@ -333,14 +525,30 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
             override fun keyPressed(e: KeyEvent) {
                 when (e.keyCode) {
                     KeyEvent.VK_R -> { view = initialView; touch() }
-                    KeyEvent.VK_D -> { denoiseOn = !denoiseOn; lastInput = 0 }
-                    KeyEvent.VK_S -> saveRequested = true
-                    KeyEvent.VK_PLUS, KeyEvent.VK_ADD, KeyEvent.VK_EQUALS -> { view = view.copy(vfov = (view.vfov - 2).coerceAtLeast(5.0)); touch() }
-                    KeyEvent.VK_MINUS, KeyEvent.VK_SUBTRACT -> { view = view.copy(vfov = (view.vfov + 2).coerceAtMost(120.0)); touch() }
+                    KeyEvent.VK_D -> { denoiseOn = !denoiseOn; controls.syncDenoise() }
+                    KeyEvent.VK_S -> requestSave()
+                    KeyEvent.VK_PLUS, KeyEvent.VK_ADD, KeyEvent.VK_EQUALS -> { view = view.with(vfov = (view.vfov - 2).coerceAtLeast(5.0)); touch() }
+                    KeyEvent.VK_MINUS, KeyEvent.VK_SUBTRACT -> { view = view.with(vfov = (view.vfov + 2).coerceAtMost(120.0)); touch() }
+                    KeyEvent.VK_DELETE -> selected?.let { removeObject(it); controls.refreshObjects() }
                     KeyEvent.VK_ESCAPE -> frame.dispose()
                 }
             }
         })
+    }
+
+    /** Ctrl + click: the selected object moves to the floor under the cursor. */
+    private fun place(mouseX: Int, mouseY: Int) {
+        val o = selected ?: return
+        val r = panel.imageBounds()
+        if (r.width <= 0 || r.height <= 0) return
+        val fx = (mouseX - r.x).toDouble() / r.width
+        val fy = (mouseY - r.y).toDouble() / r.height
+        if (fx !in 0.0..1.0 || fy !in 0.0..1.0) return
+        val hit = floorPoint(view, fx, fy, o.y) ?: return
+        o.x = hit[0]
+        o.z = hit[2]
+        sceneChanged()
+        controls.refreshSelection()
     }
 
     private fun touch() {
@@ -359,12 +567,12 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
         val shownHeight = panel.imageBounds().height.coerceAtLeast(1)
         val unitsPerPixel = 2.0 * v.radius * tan(Math.toRadians(v.vfov / 2)) / shownHeight
         val target = DoubleArray(3) { v.target[it] + (-dx * u[it] + dy * up[it]) * unitsPerPixel }
-        return v.copy(target = target)
+        return v.with(target = target)
     }
 
     private fun dolly(radius: Double, steps: Double): Double = (radius * Math.pow(ZOOM_STEP, steps)).coerceIn(1.0, 1e5)
 
-    /** Draws the latest image, scaled to fit, and the status line under it. */
+    /** Draws the latest image, scaled to fit, the placement marker, and the status line. */
     private inner class ImagePanel : JPanel() {
         init {
             background = Color(0x131211)
@@ -374,9 +582,7 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
         /** Where the image goes: as large as fits above the status line, proportions kept. */
         fun imageBounds(): java.awt.Rectangle {
             val available = (height - STATUS_HEIGHT).coerceAtLeast(1)
-            val image = shown ?: return java.awt.Rectangle(0, 0, width, available)
-            // The preview is smaller than the full image but has its proportions.
-            val aspect = image.width.toDouble() / image.height
+            val aspect = resolution.width.toDouble() / resolution.height
             val w = minOf(width.toDouble(), available * aspect)
             val h = w / aspect
             return java.awt.Rectangle(((width - w) / 2).toInt(), ((available - h) / 2).toInt(), w.toInt(), h.toInt())
@@ -389,6 +595,13 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
                 val r = imageBounds()
                 g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR)
                 g2.drawImage(image, r.x, r.y, r.width, r.height, null)
+            }
+            placeMarker?.let { p ->
+                g2.color = Color(0xE8C547)
+                g2.stroke = BasicStroke(2f)
+                g2.drawOval(p.x - 10, p.y - 10, 20, 20)
+                g2.drawLine(p.x - 16, p.y, p.x + 16, p.y)
+                g2.drawLine(p.x, p.y - 16, p.x, p.y + 16)
             }
             g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON)
             g2.font = Font(Font.SANS_SERIF, Font.PLAIN, 12)
@@ -404,10 +617,12 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
         private const val PREVIEW_SAMPLES = 1
         /** How long after the last mouse or key move the full-size render takes over. */
         private const val SETTLE_MS = 150L
+        /** How long after an object edit the scene is rebuilt, so a run of edits costs one rebuild. */
+        private const val REBUILD_DELAY_MS = 250L
         private const val FRAME_MS = 16L
         private const val LAUNCH_MS = 40.0
         private const val DISPLAY_INTERVAL_NS = 100_000_000L
-        private const val MAX_SAMPLES = 1 shl 16
+        private const val DEFAULT_TARGET = 1024
         private const val FIRST_DENOISE = 16
         private const val GUIDE_SAMPLES = 16
         private const val ORBIT_SPEED = 0.005
@@ -416,6 +631,6 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
         private const val DRAG_ZOOM = 0.02
         private const val STATUS_HEIGHT = 44
         private const val HELP =
-            "LPM obrót · Shift+LPM / ŚPM przesuwanie · kółko / PPM zoom · R reset · D odszumianie · S zapis · +/- kąt · Esc"
+            "LPM obrót · Shift+LPM / ŚPM przesuwanie · kółko / PPM zoom · Ctrl+LPM postaw obiekt · R reset · D odszum. · S zapis · Del usuń"
     }
 }
