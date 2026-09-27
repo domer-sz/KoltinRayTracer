@@ -45,7 +45,9 @@ class GpuRenderer : Renderer {
                 val buildStart = System.nanoTime()
                 // -Drt.cl.options adds compiler flags for experiments, e.g. -cl-nv-verbose.
                 val extra = System.getProperty("rt.cl.options") ?: ""
-                val options = listOf(BUILD_OPTIONS, scene.kernelDefines(), registerCap(cl, scene, extra), extra)
+                // -Drt.aov=albedo|normal renders a denoiser guide instead of the image.
+                val aov = when (System.getProperty("rt.aov")) { "albedo" -> "-DAOV_MODE=1"; "normal" -> "-DAOV_MODE=2"; else -> "" }
+                val options = listOf(BUILD_OPTIONS, scene.kernelDefines(), aov, registerCap(cl, scene, extra), extra)
                     .joinToString(" ").trim()
                 val program = cl.buildProgram(kernelSource(), options)
                 val buildMs = (System.nanoTime() - buildStart) / 1_000_000

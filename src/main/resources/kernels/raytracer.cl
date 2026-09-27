@@ -53,6 +53,12 @@
 #define MAT_ISOTROPIC 1
 #endif
 
+// 0 renders the image. 1 or 2 render a denoiser guide instead, averaged over the pixel like the
+// image: the albedo (1) or the normal (2) of whatever the camera ray hits first.
+#ifndef AOV_MODE
+#define AOV_MODE 0
+#endif
+
 // ---------------------------------------------------------------- random numbers
 
 typedef struct {
@@ -684,6 +690,20 @@ inline bool scatter(__global const int* matI, __global const float* matF,
     return true;
 }
 
+// The surface colour a denoiser should keep: the texture's own colour, white for glass (it has
+// none of its own), and lamps clamped to white.
+inline float3 aov_albedo(__global const int* matI,
+                         __global const int* texI, __global const float* texF,
+                         __global const uchar* images,
+                         __global const float* perlinVectors, __global const int* perlinPermutations,
+                         const HitRecord* rec) {
+    int type = matI[rec->material * 2];
+    if (type == 2) return (float3)(1.0f, 1.0f, 1.0f);
+    float3 colour = texture_value(texI, texF, images, perlinVectors, perlinPermutations,
+                                  matI[rec->material * 2 + 1], rec->u, rec->v, rec->point);
+    return clamp(colour, 0.0f, 1.0f);
+}
+
 // ---------------------------------------------------------------- sampling the lights
 
 /** A direction from [origin] towards a random point on one of the lights, picked evenly. */
@@ -860,6 +880,19 @@ __kernel void render(__global const float* restrict cam,
             sampleColor = (float3)(0.0f, 0.0f, 0.0f);
             depth = 0;
             fresh = false;
+        }
+
+        if (AOV_MODE) {
+            HitRecord first;
+            float3 guide = (float3)(0.0f, 0.0f, 0.0f);
+            if (world_hit(&scene, rootNode, origin, direction, time, 0.001f, INFINITY, &rng, &first)) {
+                guide = AOV_MODE == 2 ? first.normal
+                    : aov_albedo(matI, texI, texF, images, perlinVectors, perlinPermutations, &first);
+            }
+            pixelColor += guide;
+            sample++;
+            fresh = true;
+            continue;
         }
 
         bool done = false;

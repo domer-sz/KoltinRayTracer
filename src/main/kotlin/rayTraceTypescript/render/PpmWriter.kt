@@ -2,6 +2,8 @@ package rayTraceTypescript.render
 
 import rayTraceTypescript.Color
 import java.awt.image.BufferedImage
+import java.nio.ByteBuffer
+import java.nio.ByteOrder
 import java.nio.charset.StandardCharsets
 import java.nio.file.Files
 import java.nio.file.Path
@@ -28,12 +30,26 @@ object PpmWriter {
         }
         Files.write(outputPath, sb.toString().toByteArray(StandardCharsets.UTF_8))
         ImageIO.write(image, "png", pngPath(outputPath).toFile())
+        // -Drt.pfm also keeps the unclipped linear pixels, for a denoiser or later exposure changes.
+        if (System.getProperty("rt.pfm") != null) writePfm(siblingPath(outputPath, "pfm"), width, height, linearRgb)
     }
 
     /** Where the PNG copy of [outputPath] goes: the same name with a .png extension. */
-    fun pngPath(outputPath: Path): Path {
+    fun pngPath(outputPath: Path): Path = siblingPath(outputPath, "png")
+
+    /** Little-endian colour PFM, rows stored bottom to top as the format wants. */
+    private fun writePfm(path: Path, width: Int, height: Int, linearRgb: FloatArray) {
+        val header = "PF\n$width $height\n-1.0\n".toByteArray(StandardCharsets.US_ASCII)
+        val body = ByteBuffer.allocate(width * height * 12).order(ByteOrder.LITTLE_ENDIAN)
+        for (row in height - 1 downTo 0) {
+            for (i in row * width * 3 until (row + 1) * width * 3) body.putFloat(linearRgb[i])
+        }
+        Files.write(path, header + body.array())
+    }
+
+    private fun siblingPath(outputPath: Path, extension: String): Path {
         val name = outputPath.fileName.toString()
         val stem = if (name.lowercase().endsWith(".ppm")) name.dropLast(4) else name
-        return outputPath.resolveSibling("$stem.png")
+        return outputPath.resolveSibling("$stem.$extension")
     }
 }
