@@ -39,132 +39,135 @@ class GpuRenderer : Renderer {
         val pixels = FloatArray(setup.totalPixels * 3)
         val flattenMs = (System.nanoTime() - flattenStart) / 1_000_000
 
-        OpenClContext.create().use { cl ->
-            val buildStart = System.nanoTime()
-            // -Drt.cl.options adds compiler flags for experiments, e.g. -cl-nv-verbose.
-            val extra = System.getProperty("rt.cl.options") ?: ""
-            val options = listOf(BUILD_OPTIONS, scene.kernelDefines(), registerCap(cl, scene, extra), extra)
-                .joinToString(" ").trim()
-            val program = cl.buildProgram(kernelSource(), options)
-            val buildMs = (System.nanoTime() - buildStart) / 1_000_000
-            val kernel = MemoryStack.stackPush().use { stack ->
-                val errcode = stack.mallocInt(1)
-                val handle = clCreateKernel(program, "render", errcode)
-                OpenClContext.check(errcode, "clCreateKernel")
-                handle
-            }
-
-            val buffers = mutableListOf<Long>()
-            try {
-                fun readOnly(data: FloatArray) = create(cl.context, pad(data)).also { buffers += it }
-                fun readOnly(data: IntArray) = create(cl.context, pad(data)).also { buffers += it }
-
-                val cameraBuffer = readOnly(cameraParameters(setup))
-                val nodes = readOnly(scene.nodes)
-                val leaves = readOnly(scene.leaves)
-                val refs = readOnly(scene.refs)
-                val spheres = readOnly(scene.spheres)
-                val sphereMaterials = readOnly(scene.sphereMaterials)
-                val triangles = readOnly(scene.triangles)
-                val triangleMaterials = readOnly(scene.triangleMaterials)
-                val quads = readOnly(scene.quads)
-                val quadMaterials = readOnly(scene.quadMaterials)
-                val mediumInts = readOnly(scene.mediumInts)
-                val mediumFloats = readOnly(scene.mediumFloats)
-                val lights = readOnly(scene.lights)
-                val materialInts = readOnly(scene.materialInts)
-                val materialFloats = readOnly(scene.materialFloats)
-                val textureInts = readOnly(scene.textureInts)
-                val textureFloats = readOnly(scene.textureFloats)
-                val textureImages = createBytes(cl.context, scene.textureImages).also { buffers += it }
-                val perlinVectors = readOnly(scene.perlinVectors)
-                val perlinPermutations = readOnly(scene.perlinPermutations)
-
-                val output = MemoryStack.stackPush().use { stack ->
+        // Holds the card at full clocks for the whole render (see GpuKeepAwake).
+        GpuKeepAwake.startIfUseful().use {
+            OpenClContext.create().use { cl ->
+                val buildStart = System.nanoTime()
+                // -Drt.cl.options adds compiler flags for experiments, e.g. -cl-nv-verbose.
+                val extra = System.getProperty("rt.cl.options") ?: ""
+                val options = listOf(BUILD_OPTIONS, scene.kernelDefines(), registerCap(cl, scene, extra), extra)
+                    .joinToString(" ").trim()
+                val program = cl.buildProgram(kernelSource(), options)
+                val buildMs = (System.nanoTime() - buildStart) / 1_000_000
+                val kernel = MemoryStack.stackPush().use { stack ->
                     val errcode = stack.mallocInt(1)
-                    val handle = clCreateBuffer(
-                        cl.context,
-                        // Read as well as written: every slice of samples after the first adds to it.
-                        CL_MEM_READ_WRITE.toLong(),
-                        pixels.size.toLong() * Float.SIZE_BYTES,
-                        errcode
-                    )
-                    OpenClContext.check(errcode, "clCreateBuffer(output)")
+                    val handle = clCreateKernel(program, "render", errcode)
+                    OpenClContext.check(errcode, "clCreateKernel")
                     handle
                 }
-                buffers += output
-
-                var arg = 0
-                for (buffer in listOf(
-                    cameraBuffer, nodes, leaves, refs, spheres, sphereMaterials,
-                    triangles, triangleMaterials, quads, quadMaterials, mediumInts, mediumFloats, lights,
-                    materialInts, materialFloats, textureInts, textureFloats, textureImages,
-                    perlinVectors, perlinPermutations, output
-                )) {
-                    OpenClContext.check(clSetKernelArg1p(kernel, arg++, buffer), "clSetKernelArg($arg)")
-                }
-                clSetKernelArg1i(kernel, arg++, setup.imageWidth)
-                clSetKernelArg1i(kernel, arg++, setup.imageHeight)
-                val sampleStartArg = arg++
-                val sampleCountArg = arg++
-                clSetKernelArg1i(kernel, arg++, setup.maxReflectionDepth)
-                clSetKernelArg1f(kernel, arg++, setup.pixelSamplesScale)
-                clSetKernelArg1i(kernel, arg++, scene.rootNode)
-                clSetKernelArg1i(kernel, arg++, scene.lightCount)
-                clSetKernelArg1l(kernel, arg, seed())
-
-                val progress = ProgressBar(PROGRESS_STEPS)
-                val kernelStart = System.nanoTime()
-                var launches = 0
-                MemoryStack.stackPush().use { stack ->
-                    // One work item per pixel, a warp's 32 covering an 8x4 tile: neighbouring
-                    // rays stay together on their first bounces, where they diverge least.
-                    val tiles = ((setup.imageWidth + 7) / 8).toLong() * ((setup.imageHeight + 3) / 4)
-                    val localSize = (System.getProperty("rt.cl.local")?.toLongOrNull() ?: LOCAL_SIZE)
-                    val globalWorkSize = stack.mallocPointer(1)
-                        .put(0, (tiles * 32 + localSize - 1) / localSize * localSize)
-                    val localWorkSize = stack.mallocPointer(1).put(0, localSize)
-
-                    // Every launch covers the whole image and a slice of the samples, sized to
-                    // take about TARGET_LAUNCH_MS: plenty of threads to keep every SM full, and
-                    // short enough for the display driver's watchdog. The random streams are
-                    // keyed by pixel and sample, so the slicing does not change the image.
-                    var done = 0
-                    var slice = 1
-                    while (done < setup.samplesPerPixel) {
-                        val count = minOf(slice, setup.samplesPerPixel - done)
-                        clSetKernelArg1i(kernel, sampleStartArg, done)
-                        clSetKernelArg1i(kernel, sampleCountArg, count)
-                        val launchStart = System.nanoTime()
-                        OpenClContext.check(
-                            clEnqueueNDRangeKernel(cl.queue, kernel, 1, null, globalWorkSize, localWorkSize, null, null),
-                            "clEnqueueNDRangeKernel"
+    
+                val buffers = mutableListOf<Long>()
+                try {
+                    fun readOnly(data: FloatArray) = create(cl.context, pad(data)).also { buffers += it }
+                    fun readOnly(data: IntArray) = create(cl.context, pad(data)).also { buffers += it }
+    
+                    val cameraBuffer = readOnly(cameraParameters(setup))
+                    val nodes = readOnly(scene.nodes)
+                    val leaves = readOnly(scene.leaves)
+                    val refs = readOnly(scene.refs)
+                    val spheres = readOnly(scene.spheres)
+                    val sphereMaterials = readOnly(scene.sphereMaterials)
+                    val triangles = readOnly(scene.triangles)
+                    val triangleMaterials = readOnly(scene.triangleMaterials)
+                    val quads = readOnly(scene.quads)
+                    val quadMaterials = readOnly(scene.quadMaterials)
+                    val mediumInts = readOnly(scene.mediumInts)
+                    val mediumFloats = readOnly(scene.mediumFloats)
+                    val lights = readOnly(scene.lights)
+                    val materialInts = readOnly(scene.materialInts)
+                    val materialFloats = readOnly(scene.materialFloats)
+                    val textureInts = readOnly(scene.textureInts)
+                    val textureFloats = readOnly(scene.textureFloats)
+                    val textureImages = createBytes(cl.context, scene.textureImages).also { buffers += it }
+                    val perlinVectors = readOnly(scene.perlinVectors)
+                    val perlinPermutations = readOnly(scene.perlinPermutations)
+    
+                    val output = MemoryStack.stackPush().use { stack ->
+                        val errcode = stack.mallocInt(1)
+                        val handle = clCreateBuffer(
+                            cl.context,
+                            // Read as well as written: every slice of samples after the first adds to it.
+                            CL_MEM_READ_WRITE.toLong(),
+                            pixels.size.toLong() * Float.SIZE_BYTES,
+                            errcode
                         )
-                        OpenClContext.check(clFinish(cl.queue), "clFinish")
-                        val launchMs = maxOf((System.nanoTime() - launchStart) / 1_000_000.0, 1.0)
-                        done += count
-                        launches++
-                        slice = (count * TARGET_LAUNCH_MS / launchMs).toInt().coerceIn(1, count * 4)
-                        progress.report((done.toLong() * PROGRESS_STEPS / setup.samplesPerPixel).toInt())
+                        OpenClContext.check(errcode, "clCreateBuffer(output)")
+                        handle
                     }
+                    buffers += output
+    
+                    var arg = 0
+                    for (buffer in listOf(
+                        cameraBuffer, nodes, leaves, refs, spheres, sphereMaterials,
+                        triangles, triangleMaterials, quads, quadMaterials, mediumInts, mediumFloats, lights,
+                        materialInts, materialFloats, textureInts, textureFloats, textureImages,
+                        perlinVectors, perlinPermutations, output
+                    )) {
+                        OpenClContext.check(clSetKernelArg1p(kernel, arg++, buffer), "clSetKernelArg($arg)")
+                    }
+                    clSetKernelArg1i(kernel, arg++, setup.imageWidth)
+                    clSetKernelArg1i(kernel, arg++, setup.imageHeight)
+                    val sampleStartArg = arg++
+                    val sampleCountArg = arg++
+                    clSetKernelArg1i(kernel, arg++, setup.maxReflectionDepth)
+                    clSetKernelArg1f(kernel, arg++, setup.pixelSamplesScale)
+                    clSetKernelArg1i(kernel, arg++, scene.rootNode)
+                    clSetKernelArg1i(kernel, arg++, scene.lightCount)
+                    clSetKernelArg1l(kernel, arg, seed())
+    
+                    val progress = ProgressBar(PROGRESS_STEPS)
+                    val kernelStart = System.nanoTime()
+                    var launches = 0
+                    MemoryStack.stackPush().use { stack ->
+                        // One work item per pixel, a warp's 32 covering an 8x4 tile: neighbouring
+                        // rays stay together on their first bounces, where they diverge least.
+                        val tiles = ((setup.imageWidth + 7) / 8).toLong() * ((setup.imageHeight + 3) / 4)
+                        val localSize = (System.getProperty("rt.cl.local")?.toLongOrNull() ?: LOCAL_SIZE)
+                        val globalWorkSize = stack.mallocPointer(1)
+                            .put(0, (tiles * 32 + localSize - 1) / localSize * localSize)
+                        val localWorkSize = stack.mallocPointer(1).put(0, localSize)
+    
+                        // Every launch covers the whole image and a slice of the samples, sized to
+                        // take about TARGET_LAUNCH_MS: plenty of threads to keep every SM full, and
+                        // short enough for the display driver's watchdog. The random streams are
+                        // keyed by pixel and sample, so the slicing does not change the image.
+                        var done = 0
+                        var slice = 1
+                        while (done < setup.samplesPerPixel) {
+                            val count = minOf(slice, setup.samplesPerPixel - done)
+                            clSetKernelArg1i(kernel, sampleStartArg, done)
+                            clSetKernelArg1i(kernel, sampleCountArg, count)
+                            val launchStart = System.nanoTime()
+                            OpenClContext.check(
+                                clEnqueueNDRangeKernel(cl.queue, kernel, 1, null, globalWorkSize, localWorkSize, null, null),
+                                "clEnqueueNDRangeKernel"
+                            )
+                            OpenClContext.check(clFinish(cl.queue), "clFinish")
+                            val launchMs = maxOf((System.nanoTime() - launchStart) / 1_000_000.0, 1.0)
+                            done += count
+                            launches++
+                            slice = (count * TARGET_LAUNCH_MS / launchMs).toInt().coerceIn(1, count * 4)
+                            progress.report((done.toLong() * PROGRESS_STEPS / setup.samplesPerPixel).toInt())
+                        }
+                    }
+                    val kernelMs = (System.nanoTime() - kernelStart) / 1_000_000
+                    // Kept apart so the kernel's own speed is not buried under scene preparation.
+                    System.err.println(
+                        "\n[gpu] flatten $flattenMs ms, build $buildMs ms, kernel $kernelMs ms in $launches launches " +
+                            "(${scene.nodeCount} nodes, depth ${scene.maxDepth})"
+                    )
+    
+                    OpenClContext.check(
+                        clEnqueueReadBuffer(cl.queue, output, true, 0, pixels, null, null),
+                        "clEnqueueReadBuffer"
+                    )
+                    PpmWriter.write(outputPath, setup.imageWidth, setup.imageHeight, pixels)
+                    progress.finish()
+                } finally {
+                    buffers.forEach { clReleaseMemObject(it) }
+                    clReleaseKernel(kernel)
+                    clReleaseProgram(program)
                 }
-                val kernelMs = (System.nanoTime() - kernelStart) / 1_000_000
-                // Kept apart so the kernel's own speed is not buried under scene preparation.
-                System.err.println(
-                    "\n[gpu] flatten $flattenMs ms, build $buildMs ms, kernel $kernelMs ms in $launches launches " +
-                        "(${scene.nodeCount} nodes, depth ${scene.maxDepth})"
-                )
-
-                OpenClContext.check(
-                    clEnqueueReadBuffer(cl.queue, output, true, 0, pixels, null, null),
-                    "clEnqueueReadBuffer"
-                )
-                PpmWriter.write(outputPath, setup.imageWidth, setup.imageHeight, pixels)
-                progress.finish()
-            } finally {
-                buffers.forEach { clReleaseMemObject(it) }
-                clReleaseKernel(kernel)
-                clReleaseProgram(program)
             }
         }
 
