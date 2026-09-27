@@ -18,6 +18,7 @@ import rayTraceTypescript.objects.Quad
 import rayTraceTypescript.objects.RotateY
 import rayTraceTypescript.objects.Translate
 import rayTraceTypescript.objects.box
+import rayTraceTypescript.objects.checkeredBox
 import rayTraceTypescript.objects.Sphere
 import rayTraceTypescript.randomWorld
 import rayTraceTypescript.utils.randomFloat
@@ -332,13 +333,21 @@ object BookScenes {
      * The book renders it at 1000 samples. Turning the lights off (-Drt.lights=off) leaves
      * exactly the same scene sampled the way The Next Week did it, which is the comparison the
      * whole book is about.
+     *
+     * -Drt.block=checker covers the tall block in a black and white checkerboard.
      */
     fun cornellFinal(samples: Int = 200, width: Int = 600): SceneDefinition {
         val white = Lambertian(Color(0.73f, 0.73f, 0.73f))
         val glass = Dielectric(1.5f)
+        val block = if (System.getProperty("rt.block") == "checker") {
+            // 27.5 units a square: 6 across the block, 12 up it.
+            checkeredBox(Point(0f, 0f, 0f), Point(165f, 330f, 165f), 27.5f, Color(0.73f, 0.73f, 0.73f), Color(0.03f, 0.03f, 0.03f))
+        } else {
+            box(Point(0f, 0f, 0f), Point(165f, 330f, 165f), white)
+        }
 
         val tall = Translate(
-            RotateY(box(Point(0f, 0f, 0f), Point(165f, 330f, 165f), white), 15.0f),
+            RotateY(block, 15.0f),
             Vector(265f, 0f, 295f)
         )
         val glassSphere = Sphere(Point(190f, 90f, 190f), 90f, glass)

@@ -23,6 +23,7 @@ import rayTraceTypescript.textures.NoiseTexture
 import rayTraceTypescript.textures.Perlin
 import rayTraceTypescript.textures.SolidColorTexture
 import rayTraceTypescript.textures.Texture
+import rayTraceTypescript.textures.UvCheckerTexture
 import java.io.ByteArrayOutputStream
 import java.util.IdentityHashMap
 
@@ -308,6 +309,11 @@ class SceneFlattener private constructor() {
                 intArrayOf(4, registerPerlin(texture.perlin), 0, 0),
                 floatArrayOf(texture.scale, 0.0f, 0.0f, 0.0f)
             )
+            is UvCheckerTexture -> {
+                val even = registerTexture(texture.even)
+                val odd = registerTexture(texture.odd)
+                textureEntry(intArrayOf(5, even, odd, 0), floatArrayOf(texture.cellsU, texture.cellsV, 0.0f, 0.0f))
+            }
             else -> throw IllegalArgumentException("Unsupported texture for GPU rendering: ${texture::class.java.name}")
         }
     }

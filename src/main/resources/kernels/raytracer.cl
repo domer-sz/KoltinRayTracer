@@ -40,6 +40,9 @@
 #ifndef TEX_NOISE
 #define TEX_NOISE 1
 #endif
+#ifndef TEX_UVCHECKER
+#define TEX_UVCHECKER 1
+#endif
 #ifndef MAT_METAL
 #define MAT_METAL 1
 #endif
@@ -554,6 +557,14 @@ inline float3 texture_value(__global const int* texI, __global const float* texF
 
             int at = offset + (j * width + i) * 3;
             return (float3)((float)images[at], (float)images[at + 1], (float)images[at + 2]) * (1.0f / 255.0f);
+        }
+        if (TEX_UVCHECKER && type == 5) {                              // UvCheckerTexture
+            float cellsU = texF[index * 4];
+            float cellsV = texF[index * 4 + 1];
+            int cellU = clamp((int)floor(u * cellsU), 0, (int)cellsU - 1);
+            int cellV = clamp((int)floor(v * cellsV), 0, (int)cellsV - 1);
+            index = ((cellU + cellV) % 2 == 0) ? texI[index * 4 + 1] : texI[index * 4 + 2];
+            continue;
         }
         if (TEX_NOISE && type == 4) {                                  // NoiseTexture
             float scale = texF[index * 4];

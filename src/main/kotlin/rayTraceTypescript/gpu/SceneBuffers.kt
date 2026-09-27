@@ -20,7 +20,8 @@ package rayTraceTypescript.gpu
  *    function's material, and the negated inverse density
  *  - [lights]: 2 ints per light - which primitive buffer it lives in and its index there
  *  - [materialFloats]: 2 floats per material - fuzz, refraction index
- *  - [textureInts]: 4 ints per texture - type (0 solid, 1 checker, 2 image, 3 missing image) + payload
+ *  - [textureInts]: 4 ints per texture - type (0 solid, 1 checker, 2 image, 3 missing image,
+ *    4 noise, 5 u/v checker) + payload
  *  - [textureFloats]: 4 floats per texture - solid rgb, the checker's inverted scale, or a
  *    noise texture's scale
  *  - [perlinVectors] / [perlinPermutations]: one 256-entry lattice per Perlin instance, copied
@@ -78,6 +79,7 @@ class SceneBuffers(
             "TEX_CHECKER" to (1 in textures),
             "TEX_IMAGE" to (2 in textures),
             "TEX_NOISE" to (4 in textures),
+            "TEX_UVCHECKER" to (5 in textures),
             "MAT_METAL" to (1 in materials),
             "MAT_DIELECTRIC" to (2 in materials),
             "MAT_EMISSIVE" to (3 in materials),
