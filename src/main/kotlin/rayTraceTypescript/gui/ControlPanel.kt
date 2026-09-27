@@ -52,7 +52,14 @@ class ControlPanel(private val viewer: Viewer, private val frame: JFrame) : JPan
     private val denoise = JCheckBox("Odszumianie (D)", viewer.denoiseOn)
     private val save = JButton("Zapisz obraz (S)")
 
-    private val listModel = DefaultListModel<PlacedObject>()
+    private val lightSwitches = viewer.lights.map { light ->
+        JCheckBox(light.part.name, light.enabled).apply {
+            addActionListener { viewer.setLight(light, isSelected) }
+        }
+    }
+    private val restore = JButton("Przywróć obiekty sceny")
+
+    private val listModel = DefaultListModel<SceneEntry>()
     private val list = JList(listModel).apply {
         selectionMode = ListSelectionModel.SINGLE_SELECTION
         visibleRowCount = 5
@@ -69,13 +76,13 @@ class ControlPanel(private val viewer: Viewer, private val frame: JFrame) : JPan
     private val finish = JComboBox(Finish.values())
     private val zUp = JCheckBox("Oś Z w górę (pliki do druku 3D)")
     private val info = JLabel(" ")
-    private val objectFields: List<Component> = listOf(remove, centre, posX, posY, posZ, turn, size, finish, zUp)
+    /** Fields only an added model has; the scene's own objects can only be removed. */
+    private val modelFields: List<Component> = listOf(centre, posX, posY, posZ, turn, size, finish, zUp)
 
     private var lastFolder: File? = File("../stls").takeIf { it.isDirectory } ?: File(".")
 
     init {
         border = BorderFactory.createEmptyBorder(10, 10, 10, 10)
-        preferredSize = Dimension(290, 0)
 
         section("Obraz")
         field("Gotowe", preset)
@@ -86,10 +93,16 @@ class ControlPanel(private val viewer: Viewer, private val frame: JFrame) : JPan
         full(progress)
         full(denoise)
         full(save)
+        full(JButton("Pomoc - skróty (F1)").apply { addActionListener { HelpDialog.show(frame) } })
 
-        section("Obiekty")
+        if (lightSwitches.isNotEmpty()) {
+            section("Światła")
+            lightSwitches.forEach { full(it) }
+        }
+
+        section("Obiekty na scenie")
         full(add)
-        full(JScrollPane(list).apply { preferredSize = Dimension(250, 96) })
+        full(JScrollPane(list).apply { preferredSize = Dimension(250, 110); minimumSize = Dimension(250, 110) })
         full(JPanel(GridBagLayout()).apply {
             add(remove, GridBagConstraints().apply { weightx = 1.0; fill = GridBagConstraints.HORIZONTAL; insets = Insets(0, 0, 0, 4) })
             add(centre, GridBagConstraints().apply { weightx = 1.0; fill = GridBagConstraints.HORIZONTAL })
@@ -102,6 +115,7 @@ class ControlPanel(private val viewer: Viewer, private val frame: JFrame) : JPan
         field("Materiał", finish)
         full(zUp)
         full(info)
+        if (viewer.builtIns.any { !it.part.isLight }) full(restore)
         full(JLabel("<html><small>Ctrl + klik w obraz stawia zaznaczony obiekt na podłodze w tym miejscu.</small></html>"))
         add(JPanel(), GridBagConstraints().apply { gridy = row++; weighty = 1.0 })
 
@@ -121,7 +135,8 @@ class ControlPanel(private val viewer: Viewer, private val frame: JFrame) : JPan
 
         add.addActionListener { chooseModel() }
         remove.addActionListener { viewer.selected?.let { viewer.removeObject(it); refreshObjects() } }
-        centre.addActionListener { viewer.selected?.let { viewer.centreInView(it); refreshSelection() } }
+        centre.addActionListener { viewer.selectedModel?.let { viewer.centreInView(it); refreshSelection() } }
+        restore.addActionListener { viewer.restoreBuiltIns(); refreshObjects() }
         list.addListSelectionListener {
             if (!it.valueIsAdjusting && !syncing) {
                 viewer.selected = list.selectedValue
@@ -135,13 +150,13 @@ class ControlPanel(private val viewer: Viewer, private val frame: JFrame) : JPan
         size.addChangeListener { edit { o -> o.height = size.value as Double } }
         finish.addActionListener { edit { o -> o.finish = finish.selectedItem as Finish } }
         zUp.addActionListener { edit { o -> o.zUp = zUp.isSelected } }
-        refreshSelection()
+        refreshObjects()
     }
 
     /** Applies a field change to the selected object, unless the panel is filling its fields. */
     private fun edit(change: (PlacedObject) -> Unit) {
         if (syncing) return
-        val o = viewer.selected ?: return
+        val o = viewer.selectedModel ?: return
         change(o)
         viewer.sceneChanged()
     }
@@ -169,18 +184,22 @@ class ControlPanel(private val viewer: Viewer, private val frame: JFrame) : JPan
     fun refreshObjects() {
         syncing = true
         listModel.clear()
-        viewer.objects.forEach { listModel.addElement(it) }
+        viewer.entries().forEach { listModel.addElement(it) }
         list.setSelectedValue(viewer.selected, true)
         syncing = false
         refreshSelection()
     }
 
-    /** Fills the object fields from the selected object, or greys them out without one. */
+    /** Fills the object fields from the selected model, or greys them out for anything else. */
     fun refreshSelection() {
-        val o = viewer.selected
+        val o = viewer.selectedModel
         syncing = true
-        objectFields.forEach { it.isEnabled = o != null }
-        if (o != null) {
+        remove.isEnabled = viewer.selected != null
+        modelFields.forEach { it.isEnabled = o != null }
+        restore.isEnabled = viewer.builtIns.any { !it.part.isLight && !it.enabled }
+        if (viewer.selected is BuiltInObject) {
+            info.text = "Obiekt sceny - można go tylko usunąć"
+        } else if (o != null) {
             posX.value = o.x
             posY.value = o.y
             posZ.value = o.z
@@ -190,10 +209,13 @@ class ControlPanel(private val viewer: Viewer, private val frame: JFrame) : JPan
             zUp.isSelected = o.zUp
             info.text = "%,d trójkątów".format(o.triangleCount)
         } else {
-            info.text = if (viewer.objects.isEmpty()) "Brak dodanych obiektów" else "Zaznacz obiekt na liście"
+            info.text = if (viewer.entries().isEmpty()) "Scena jest pusta" else "Zaznacz obiekt na liście"
         }
         syncing = false
     }
+
+    /** A fixed width; the height is whatever the fields need (the window scrolls the panel). */
+    override fun getPreferredSize(): Dimension = Dimension(PANEL_WIDTH, super.getPreferredSize().height)
 
     fun showProgress(samples: Int, target: Int) {
         progress.value = (samples.toLong() * 1000 / target.coerceAtLeast(1)).toInt()
@@ -209,7 +231,7 @@ class ControlPanel(private val viewer: Viewer, private val frame: JFrame) : JPan
     }
 
     private fun section(title: String) {
-        add(JLabel("<html><b>$title</b></html>"), GridBagConstraints().apply {
+        add(JLabel(title).apply { font = font.deriveFont(java.awt.Font.BOLD) }, GridBagConstraints().apply {
             gridx = 0; gridy = row++; gridwidth = 2; anchor = GridBagConstraints.WEST
             insets = Insets(if (row > 1) 14 else 0, 0, 6, 0)
         })
@@ -228,5 +250,9 @@ class ControlPanel(private val viewer: Viewer, private val frame: JFrame) : JPan
         add(component, GridBagConstraints().apply {
             gridx = 0; gridy = row++; gridwidth = 2; weightx = 1.0; fill = GridBagConstraints.HORIZONTAL; insets = Insets(3, 0, 3, 0)
         })
+    }
+
+    companion object {
+        private const val PANEL_WIDTH = 300
     }
 }

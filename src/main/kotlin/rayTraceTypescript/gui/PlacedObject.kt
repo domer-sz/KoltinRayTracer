@@ -7,6 +7,20 @@ import rayTraceTypescript.materials.Lambertian
 import rayTraceTypescript.materials.Material
 import rayTraceTypescript.materials.Metal
 import rayTraceTypescript.objects.Mesh
+import rayTraceTypescript.scenes.ScenePart
+
+/** An object listed in the viewer: part of the scene itself, or a model added there. */
+sealed interface SceneEntry
+
+/**
+ * An object or light the scene came with; the viewer can take it out (switch it off) and put it
+ * back, not move it.
+ */
+class BuiltInObject(val part: ScenePart) : SceneEntry {
+    @Volatile var enabled = part.enabled
+
+    override fun toString() = part.name
+}
 
 /** The looks a placed model can take. */
 enum class Finish(val label: String, val material: () -> Material) {
@@ -25,7 +39,7 @@ enum class Finish(val label: String, val material: () -> Material) {
  * are the middle of its footprint, [height] its size after scaling, [rotation] its turn about
  * the vertical in degrees.
  */
-class PlacedObject(val name: String, private val mesh: Mesh) {
+class PlacedObject(val name: String, private val mesh: Mesh) : SceneEntry {
     @Volatile var x = 0.0
     @Volatile var y = 0.0
     @Volatile var z = 0.0

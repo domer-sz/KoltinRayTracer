@@ -109,7 +109,15 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
     val objects = CopyOnWriteArrayList<PlacedObject>()
     private val sceneVersion = AtomicInteger(0)
     @Volatile private var lastSceneEdit = 0L
-    @Volatile var selected: PlacedObject? = null
+    /** The scene's own switchable lights and removable objects. */
+    val builtIns: List<BuiltInObject> = scene.parts.map { BuiltInObject(it) }
+    val lights: List<BuiltInObject> get() = builtIns.filter { it.part.isLight }
+    @Volatile var selected: SceneEntry? = null
+    /** The selection when it is an added model - the only kind that can be moved. */
+    val selectedModel: PlacedObject? get() = selected as? PlacedObject
+
+    /** What the object list shows: the scene's objects still in it, then the added models. */
+    fun entries(): List<SceneEntry> = builtIns.filter { !it.part.isLight && it.enabled } + objects
 
     @Volatile private var shown: BufferedImage? = null
     @Volatile private var status = "Przygotowuję scenę…"
@@ -135,7 +143,12 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
             val display = fit(sceneResolution)
             panel.preferredSize = Dimension(display.width, display.height + STATUS_HEIGHT)
             frame.contentPane.add(panel, BorderLayout.CENTER)
-            frame.contentPane.add(controls, BorderLayout.EAST)
+            // The panel scrolls when the window is shorter than its fields.
+            frame.contentPane.add(javax.swing.JScrollPane(controls).apply {
+                horizontalScrollBarPolicy = javax.swing.ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER
+                border = null
+                verticalScrollBar.unitIncrement = 16
+            }, BorderLayout.EAST)
             frame.pack()
             frame.setLocationRelativeTo(null)
             frame.addWindowListener(object : WindowAdapter() {
@@ -198,9 +211,24 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
         }, "viewer-load").apply { isDaemon = true; start() }
     }
 
-    fun removeObject(o: PlacedObject) {
-        objects -= o
-        if (selected === o) selected = null
+    /** Takes [entry] out: an added model for good, one of the scene's own until [restoreBuiltIns]. */
+    fun removeObject(entry: SceneEntry) {
+        when (entry) {
+            is PlacedObject -> objects -= entry
+            is BuiltInObject -> entry.enabled = false
+        }
+        if (selected === entry) selected = null
+        sceneChanged()
+    }
+
+    /** Puts every removed object of the scene back (lights keep their switches). */
+    fun restoreBuiltIns() {
+        builtIns.filter { !it.part.isLight }.forEach { it.enabled = true }
+        sceneChanged()
+    }
+
+    fun setLight(light: BuiltInObject, on: Boolean) {
+        light.enabled = on
         sceneChanged()
     }
 
@@ -224,10 +252,36 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
 
     // ------------------------------------------------------------------ rendering (render thread)
 
+    /**
+     * The scene as it now stands: the room without any of its parts, the parts that are
+     * switched on, and the added models.
+     */
     private fun buildWorld(): Hittable {
-        val parts = mutableListOf<Hittable>(scene.world)
+        val world = scene.world
+        val all = builtIns.map { it.part.hittable }
+        val room = if (world is HittableList && all.isNotEmpty()) {
+            HittableList(world.objects.filter { o -> all.none { it === o } }.toMutableList())
+        } else world
+        val parts = mutableListOf<Hittable>(room)
+        builtIns.filter { it.enabled }.forEach { parts += it.part.hittable }
         for (o in objects) parts += HittableList(o.placedMesh().toHittables(o.finish.material()).toMutableList())
         return HittableList(parts)
+    }
+
+    /**
+     * The lights to aim samples at: the camera's list without the stand-ins of any part, plus
+     * those of the parts switched on. Null when nothing is left to aim at.
+     */
+    private fun activeLights(): Hittable? {
+        val proxies = builtIns.mapNotNull { it.part.lightProxy }
+        fun strip(h: Hittable): Hittable? = when {
+            proxies.any { it === h } -> null
+            h is HittableList -> h.objects.mapNotNull { strip(it) }.takeIf { it.isNotEmpty() }?.let { HittableList(it.toMutableList()) }
+            else -> h
+        }
+        val kept = listOfNotNull(base.lights?.let { strip(it) }) +
+            builtIns.filter { it.enabled }.mapNotNull { it.part.lightProxy }
+        return kept.takeIf { it.isNotEmpty() }?.let { HittableList(it.toMutableList()) }
     }
 
     private fun renderLoop() {
@@ -239,7 +293,7 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
                     session = null
                     status = "Przygotowuję scenę (dodane obiekty: ${objects.size})…"
                     panel.repaint()
-                    GpuSession(SceneFlattener.flatten(buildWorld(), base.lights), pixels).also { session = it }
+                    GpuSession(SceneFlattener.flatten(buildWorld(), activeLights()), pixels).also { session = it }
                 }
             }
         } catch (t: Throwable) {
@@ -469,7 +523,7 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
                 panel.requestFocusInWindow()
                 lastX = e.x
                 lastY = e.y
-                placing = SwingUtilities.isLeftMouseButton(e) && e.isControlDown && selected != null
+                placing = SwingUtilities.isLeftMouseButton(e) && e.isControlDown && selectedModel != null
                 if (placing) {
                     placeMarker = e.point
                     panel.repaint()
@@ -530,6 +584,7 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
                     KeyEvent.VK_PLUS, KeyEvent.VK_ADD, KeyEvent.VK_EQUALS -> { view = view.with(vfov = (view.vfov - 2).coerceAtLeast(5.0)); touch() }
                     KeyEvent.VK_MINUS, KeyEvent.VK_SUBTRACT -> { view = view.with(vfov = (view.vfov + 2).coerceAtMost(120.0)); touch() }
                     KeyEvent.VK_DELETE -> selected?.let { removeObject(it); controls.refreshObjects() }
+                    KeyEvent.VK_F1, KeyEvent.VK_H -> HelpDialog.show(frame)
                     KeyEvent.VK_ESCAPE -> frame.dispose()
                 }
             }
@@ -538,7 +593,7 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
 
     /** Ctrl + click: the selected object moves to the floor under the cursor. */
     private fun place(mouseX: Int, mouseY: Int) {
-        val o = selected ?: return
+        val o = selectedModel ?: return
         val r = panel.imageBounds()
         if (r.width <= 0 || r.height <= 0) return
         val fx = (mouseX - r.x).toDouble() / r.width
@@ -631,6 +686,6 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
         private const val DRAG_ZOOM = 0.02
         private const val STATUS_HEIGHT = 44
         private const val HELP =
-            "LPM obrót · Shift+LPM / ŚPM przesuwanie · kółko / PPM zoom · Ctrl+LPM postaw obiekt · R reset · D odszum. · S zapis · Del usuń"
+            "F1 / H: wszystkie skróty · LPM obrót · Shift+LPM przesuwanie · kółko zoom · Ctrl+LPM postaw obiekt · S zapis"
     }
 }

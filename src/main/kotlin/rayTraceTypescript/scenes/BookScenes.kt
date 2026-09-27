@@ -178,10 +178,11 @@ object BookScenes {
         val green = Lambertian(Color(0.12f, 0.45f, 0.15f))
         val light = DiffuseLight(Color(15f, 15f, 15f))
 
+        val lamp = Quad(Point(343f, 554f, 332f), Vector(-130f, 0f, 0f), Vector(0f, 0f, -105f), light)
         val walls = mutableListOf<Hittable>(
             Quad(Point(555f, 0f, 0f), Vector(0f, 555f, 0f), Vector(0f, 0f, 555f), green),
             Quad(Point(0f, 0f, 0f), Vector(0f, 555f, 0f), Vector(0f, 0f, 555f), red),
-            Quad(Point(343f, 554f, 332f), Vector(-130f, 0f, 0f), Vector(0f, 0f, -105f), light),
+            lamp,
             Quad(Point(0f, 0f, 0f), Vector(555f, 0f, 0f), Vector(0f, 0f, 555f), white),
             Quad(Point(555f, 555f, 555f), Vector(-555f, 0f, 0f), Vector(0f, 0f, -555f), white),
             Quad(Point(0f, 0f, 555f), Vector(555f, 0f, 0f), Vector(0f, 555f, 0f), white)
@@ -190,6 +191,7 @@ object BookScenes {
 
         return SceneDefinition(
             name = "cornell-box",
+            parts = listOf(ScenePart("Lampa sufitowa", lamp, isLight = true)),
             world = HittableList(walls),
             camera = Camera().apply {
                 aspectRatio = 1.0f
@@ -353,19 +355,35 @@ object BookScenes {
         val glassSphere = Sphere(Point(190f, 90f, 190f), 90f, glass)
 
         val scene = cornellBox(listOf(tall, glassSphere), samples, width)
+        val world = scene.world as HittableList
 
         // The material here is never asked for: these stand in only to be sampled towards.
-        val lights = HittableList(
-            mutableListOf(
-                Quad(Point(343f, 554f, 332f), Vector(-130f, 0f, 0f), Vector(0f, 0f, -105f), white),
-                Sphere(Point(190f, 90f, 190f), 90f, white)
-            )
-        )
+        val lampProxy = Quad(Point(343f, 554f, 332f), Vector(-130f, 0f, 0f), Vector(0f, 0f, -105f), white)
+        val sphereProxy = Sphere(Point(190f, 90f, 190f), 90f, white)
+        val lights = mutableListOf<Hittable>(lampProxy, sphereProxy)
 
+        // The lamp hangs above the room and slightly behind what stands in it, which leaves
+        // fronts dark. -Drt.fill=<f> switches on a fill light like a photographer's: a panel
+        // outside the box, above the camera's view (see fillLight). A viewer can switch it on
+        // either way, at DEFAULT_FILL when no -Drt.fill is given.
+        val fillStrength = System.getProperty("rt.fill")?.toFloatOrNull() ?: 0.0f
+        val fill = fillLight(if (fillStrength > 0.0f) fillStrength else DEFAULT_FILL)
+        if (fillStrength > 0.0f) {
+            world.add(fill)
+            lights.add(fill)
+        }
+
+        val lamp = scene.parts.first()
         return SceneDefinition(
             name = "cornell-final",
-            world = scene.world,
-            camera = scene.camera.apply { this.lights = lights }
+            world = world,
+            camera = scene.camera.apply { this.lights = HittableList(lights) },
+            parts = listOf(
+                ScenePart(lamp.name, lamp.hittable, lampProxy, isLight = true),
+                ScenePart("Światło przednie", fill, fill, isLight = true, enabled = fillStrength > 0.0f),
+                ScenePart("Wysoki blok", tall),
+                ScenePart("Szklana kula", glassSphere, sphereProxy)
+            )
         )
     }
 
@@ -394,19 +412,12 @@ object BookScenes {
             .transformed(1.0f, Vector(0f, 0f, 0f), Vector(360f, 0f, 170f))
         println("Loaded ${mesh.triangleCount} triangles from $path")
 
+        // The fill light (-Drt.fill) comes with cornellFinal and is aimed at this model's face.
         val world = scene.world as HittableList
-        world.add(BvhNode(HittableList(mesh.toHittables(material).toMutableList())))
-
-        // The lamp hangs above and slightly behind the model, which leaves its front dark.
-        // -Drt.fill=<f> adds a fill light like a photographer's: a panel outside the box, above
-        // the camera's view, aimed down at the model's face.
-        val fill = System.getProperty("rt.fill")?.toFloatOrNull() ?: 0.0f
-        if (fill > 0.0f) {
-            val panel = fillLight(fill)
-            world.add(panel)
-            scene.camera.lights = HittableList(mutableListOf(scene.camera.lights!!, panel))
-        }
-        return SceneDefinition(name = "cornell-model", world = world, camera = scene.camera)
+        val model = BvhNode(HittableList(mesh.toHittables(material).toMutableList()))
+        world.add(model)
+        val modelName = java.io.File(path).nameWithoutExtension
+        return SceneDefinition(name = "cornell-model", world = world, camera = scene.camera, parts = scene.parts + ScenePart(modelName, model))
     }
 
     /**
@@ -437,6 +448,9 @@ object BookScenes {
 
     /** Height the model in [cornellModel] is scaled to: a little over half the tall block. */
     private const val MODEL_HEIGHT = 190.0f
+
+    /** Fill light strength a viewer switches on when no -Drt.fill set one. */
+    private const val DEFAULT_FILL = 0.4f
 
     /**
      * Not from the books: one widescreen room holding what the two books added - quads, a
