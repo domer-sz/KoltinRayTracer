@@ -25,7 +25,9 @@ object HelpDialog {
             "Ctrl + klik w obraz" to "Postaw zaznaczony model na podłodze w tym miejscu",
             "Delete" to "Usuń zaznaczony obiekt (także kolumnę lub kulę sceny)",
             "Panel: Dodaj model…" to "Wczytaj STL, OBJ, PLY, OFF, glTF, GLB lub 3MF",
-            "Panel: X, Y, Z, Obrót, Wysokość, Materiał" to "Ustaw zaznaczony model",
+            "Panel: X, Y, Z, Obrót, Wysokość" to "Ustaw zaznaczony model",
+            "Panel: Materiał - Gotowy" to "Szary, biały, czerwony, niebieski mat, szkło, diament, lustro, złoto, miedź, stal, świecący",
+            "Panel: Materiał - Rodzaj, Kolor, parametr" to "Matowy, metal (chropowatość), szkło (wsp. załamania) lub świecący (moc)",
             "Panel: Przywróć obiekty sceny" to "Wróć usunięte obiekty sceny na miejsce"
         ),
         "Światła" to listOf(

@@ -82,7 +82,10 @@ w panelu i jest odszumiany przy 16, 64, 256… próbkach oraz na końcu.
 - **Obiekty na scenie** – lista obiektów: kolumna i szklana kula sceny (można je usunąć i przywrócić
   przyciskiem *Przywróć obiekty sceny*) oraz dodane modele. *Dodaj model…* wczytuje STL, OBJ, PLY,
   OFF, glTF/GLB albo 3MF; zaznaczony model można ustawić polami X / Y / Z, obrotem, wysokością
-  i materiałem (szary / biały / czerwony mat, szkło, lustro, złoto), albo postawić Ctrl + klikiem.
+  i materiałem, albo postawić Ctrl + klikiem. Materiał to gotowy zestaw (szary, biały, czerwony
+  i niebieski mat, szkło, diament, lustro, złoto, miedź, stal szczotkowana, świecący biały) albo własny:
+  rodzaj (matowy, metal, szkło, świecący), kolor z okna wyboru i parametr zależny od rodzaju
+  (chropowatość metalu, współczynnik załamania szkła, moc światła).
   *Oś Z w górę* włącza się sama dla plików do druku 3D (STL, 3MF).
 
 Zapisane obrazy trafiają do katalogu roboczego (albo tam, gdzie wskazuje `-Drt.out`) jako

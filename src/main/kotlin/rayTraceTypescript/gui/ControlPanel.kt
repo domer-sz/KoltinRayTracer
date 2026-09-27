@@ -10,6 +10,7 @@ import javax.swing.BorderFactory
 import javax.swing.DefaultListModel
 import javax.swing.JButton
 import javax.swing.JCheckBox
+import javax.swing.JColorChooser
 import javax.swing.JComboBox
 import javax.swing.JFileChooser
 import javax.swing.JFrame
@@ -73,11 +74,16 @@ class ControlPanel(private val viewer: Viewer, private val frame: JFrame) : JPan
     private val posZ = numberSpinner(step)
     private val turn = JSpinner(SpinnerNumberModel(0.0, -360.0, 360.0, 15.0))
     private val size = JSpinner(SpinnerNumberModel(viewer.defaultObjectHeight, 1e-3, 1e6, step))
-    private val finish = JComboBox(Finish.values())
+    private val materialPreset = JComboBox<Any>((listOf<Any>(CUSTOM) + MaterialPreset.values()).toTypedArray())
+    private val materialKind = JComboBox(MaterialKind.values())
+    private val colour = JButton("Wybierz kolor…")
+    private val parameterLabel = JLabel("Parametr")
+    private val parameter = JSpinner(SpinnerNumberModel(0.0, 0.0, 100.0, 0.05))
     private val zUp = JCheckBox("Oś Z w górę (pliki do druku 3D)")
     private val info = JLabel(" ")
     /** Fields only an added model has; the scene's own objects can only be removed. */
-    private val modelFields: List<Component> = listOf(centre, posX, posY, posZ, turn, size, finish, zUp)
+    private val modelFields: List<Component> =
+        listOf(centre, posX, posY, posZ, turn, size, materialPreset, materialKind, colour, parameter, zUp)
 
     private var lastFolder: File? = File("../stls").takeIf { it.isDirectory } ?: File(".")
 
@@ -112,7 +118,11 @@ class ControlPanel(private val viewer: Viewer, private val frame: JFrame) : JPan
         field("Z", posZ)
         field("Obrót [°]", turn)
         field("Wysokość", size)
-        field("Materiał", finish)
+        section("Materiał zaznaczonego modelu")
+        field("Gotowy", materialPreset)
+        field("Rodzaj", materialKind)
+        field("Kolor", colour)
+        field(parameterLabel, parameter)
         full(zUp)
         full(info)
         if (viewer.builtIns.any { !it.part.isLight }) full(restore)
@@ -148,7 +158,29 @@ class ControlPanel(private val viewer: Viewer, private val frame: JFrame) : JPan
         posZ.addChangeListener { edit { o -> o.z = posZ.value as Double } }
         turn.addChangeListener { edit { o -> o.rotation = turn.value as Double } }
         size.addChangeListener { edit { o -> o.height = size.value as Double } }
-        finish.addActionListener { edit { o -> o.finish = finish.selectedItem as Finish } }
+        materialPreset.addActionListener {
+            if (syncing) return@addActionListener
+            val chosen = materialPreset.selectedItem as? MaterialPreset ?: return@addActionListener
+            edit { o -> o.material = chosen.spec }
+            refreshSelection()
+        }
+        materialKind.addActionListener {
+            if (syncing) return@addActionListener
+            val kind = materialKind.selectedItem as MaterialKind
+            edit { o ->
+                // A new kind starts from its usual value: slightly rough metal, window glass, a bright light.
+                if (o.material.kind != kind) o.material = o.material.copy(kind = kind, parameter = defaultParameter(kind))
+            }
+            refreshSelection()
+        }
+        colour.addActionListener {
+            val o = viewer.selectedModel ?: return@addActionListener
+            val picked = JColorChooser.showDialog(frame, "Kolor materiału - ${o.name}", o.material.screenColor())
+                ?: return@addActionListener
+            edit { it.material = it.material.withScreenColor(picked) }
+            refreshSelection()
+        }
+        parameter.addChangeListener { edit { o -> o.material = o.material.copy(parameter = parameter.value as Double) } }
         zUp.addActionListener { edit { o -> o.zUp = zUp.isSelected } }
         refreshObjects()
     }
@@ -205,13 +237,48 @@ class ControlPanel(private val viewer: Viewer, private val frame: JFrame) : JPan
             posZ.value = o.z
             turn.value = o.rotation
             size.value = o.height
-            finish.selectedItem = o.finish
+            showMaterial(o.material)
             zUp.isSelected = o.zUp
             info.text = "%,d trójkątów".format(o.triangleCount)
         } else {
             info.text = if (viewer.entries().isEmpty()) "Scena jest pusta" else "Zaznacz obiekt na liście"
         }
         syncing = false
+    }
+
+    /**
+     * Shows [spec] in the material fields: the matching ready-made material (or "Własny"), the
+     * kind, a colour swatch, and the kind's number with its own name and range.
+     */
+    private fun showMaterial(spec: MaterialSpec) {
+        materialPreset.selectedItem = MaterialPreset.values().firstOrNull { it.spec == spec } ?: CUSTOM
+        materialKind.selectedItem = spec.kind
+        colour.icon = Swatch(spec.screenColor())
+        colour.isEnabled = spec.kind != MaterialKind.GLASS
+        colour.toolTipText = if (spec.kind == MaterialKind.GLASS) "Szkło w tym rendererze jest bezbarwne" else null
+        val kind = spec.kind
+        parameterLabel.text = kind.parameterLabel ?: "Parametr"
+        parameter.isEnabled = kind.parameterLabel != null
+        parameter.model = SpinnerNumberModel(spec.parameter.coerceIn(kind.min, kind.max), kind.min, kind.max, kind.step)
+    }
+
+    private fun defaultParameter(kind: MaterialKind): Double = when (kind) {
+        MaterialKind.MATTE -> 0.0
+        MaterialKind.METAL -> 0.1
+        MaterialKind.GLASS -> 1.5
+        MaterialKind.LIGHT -> 4.0
+    }
+
+    /** A small filled square showing a material's colour on its button. */
+    private class Swatch(private val colour: java.awt.Color) : javax.swing.Icon {
+        override fun getIconWidth() = 14
+        override fun getIconHeight() = 14
+        override fun paintIcon(c: Component?, g: java.awt.Graphics, x: Int, y: Int) {
+            g.color = colour
+            g.fillRect(x, y, 14, 14)
+            g.color = java.awt.Color.DARK_GRAY
+            g.drawRect(x, y, 13, 13)
+        }
     }
 
     /** A fixed width; the height is whatever the fields need (the window scrolls the panel). */
@@ -237,8 +304,11 @@ class ControlPanel(private val viewer: Viewer, private val frame: JFrame) : JPan
         })
     }
 
-    private fun field(label: String, component: Component) {
-        add(JLabel(label), GridBagConstraints().apply {
+    private fun field(label: String, component: Component) = field(JLabel(label), component)
+
+    /** A labelled row; the label is passed in when it changes later (the material parameter). */
+    private fun field(label: JLabel, component: Component) {
+        add(label, GridBagConstraints().apply {
             gridx = 0; gridy = row; anchor = GridBagConstraints.WEST; insets = Insets(2, 0, 2, 8)
         })
         add(component, GridBagConstraints().apply {
@@ -254,5 +324,7 @@ class ControlPanel(private val viewer: Viewer, private val frame: JFrame) : JPan
 
     companion object {
         private const val PANEL_WIDTH = 300
+        /** The preset list's entry for a material changed by hand. */
+        private const val CUSTOM = "Własny"
     }
 }

@@ -264,7 +264,7 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
         } else world
         val parts = mutableListOf<Hittable>(room)
         builtIns.filter { it.enabled }.forEach { parts += it.part.hittable }
-        for (o in objects) parts += HittableList(o.placedMesh().toHittables(o.finish.material()).toMutableList())
+        for (o in objects) parts += HittableList(o.placedMesh().toHittables(o.material.material()).toMutableList())
         return HittableList(parts)
     }
 
