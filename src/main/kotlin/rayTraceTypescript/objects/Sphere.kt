@@ -60,12 +60,14 @@ class Sphere constructor(val center: Ray, val radius: Float, val material: Mater
     /**
      * A sphere seen from outside covers a cone of directions; sampling it evenly inside that
      * cone gives one over its solid angle. Only meaningful for a still sphere, which is what
-     * a light is.
+     * a light is. Seen from inside - something standing in a glass sphere - it covers every
+     * direction, sampled evenly (the cone formula would take the root of a negative number).
      */
     override fun pdfValue(origin: Point, direction: Vector): Float {
         hit(Ray(origin, direction), Interval(0.001f, Float.POSITIVE_INFINITY)) ?: return 0.0f
 
         val distanceSquared = (center.at(0.0f) - origin).lengthSquared()
+        if (distanceSquared <= radius * radius) return 1.0f / (4.0f * pi)
         val cosThetaMax = sqrt(1.0f - radius * radius / distanceSquared)
         val solidAngle = 2.0f * pi * (1.0f - cosThetaMax)
         return 1.0f / solidAngle
@@ -74,6 +76,7 @@ class Sphere constructor(val center: Ray, val radius: Float, val material: Mater
     override fun random(origin: Point): Vector {
         val toCentre = center.at(0.0f) - origin
         val distanceSquared = toCentre.lengthSquared()
+        if (distanceSquared <= radius * radius) return Vector.randomUnitVector()
         return Onb(toCentre).transform(Vector.randomToSphere(radius, distanceSquared))
     }
 

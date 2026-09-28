@@ -23,45 +23,65 @@ import rayTraceTypescript.utils.RandomSource
 import kotlin.random.Random
 
 /**
- * A scene living on the GPU: its buffers uploaded once, one compiled kernel per mode (the image
- * and the two denoiser guides), and two output buffers - the image, and a scratch one the guides
- * render into so they never disturb samples gathered so far.
+ * A scene living on the GPU: its buffers uploaded once, one compiled kernel per mode (the image,
+ * the two denoiser guides and the quick shaded look), and two output buffers - the image, and a
+ * scratch one the guides render into so they never disturb samples gathered so far.
  *
  * Everything that changes between launches - the camera, the resolution, which samples - is a
- * launch argument, so the same session serves a file render and an interactive viewer. Launches
- * block until the GPU is done; a session belongs to one thread.
+ * launch argument, so the same session serves a file render and an interactive viewer. An
+ * edited scene replaces the old one in place ([replaceScene]): same context, same outputs, and
+ * the same kernels as long as the scene needs the same features. Launches block until the GPU
+ * is done; a session belongs to one thread.
  */
-class GpuSession(private val scene: SceneBuffers, maxPixels: Int) : AutoCloseable {
+class GpuSession(initialScene: SceneBuffers, maxPixels: Int) : AutoCloseable {
     private val keepAwake = GpuKeepAwake.startIfUseful()
     private val cl = OpenClContext.create()
+    /** Buffers the session keeps: the camera and the outputs. */
     private val buffers = mutableListOf<Long>()
+    /** The scene's buffers, released when it is replaced. */
+    private val sceneMemory = mutableListOf<Long>()
     private val programs = HashMap<Int, Pair<Long, Long>>()
     private val seed = RandomSource.seedValue() ?: Random.Default.nextLong()
 
+    private var scene = initialScene
+    /** The feature switches the kernels were built with, and whether volumes need more registers. */
+    private var defines = initialScene.kernelDefines()
+    private var hasMedia = initialScene.mediumCount > 0
+
     private val cameraBuffer: Long
-    private val sceneArguments: List<Long>
+    private var sceneArguments: List<Long> = emptyList()
     private val outputs: List<Long>
 
     init {
         try {
-            cameraBuffer = create(FloatArray(CAMERA_FLOATS))
-            sceneArguments = listOf(
-                cameraBuffer,
-                create(scene.nodes), create(scene.leaves), create(scene.refs),
-                create(scene.spheres), create(scene.sphereMaterials),
-                create(scene.triangles), create(scene.triangleMaterials),
-                create(scene.quads), create(scene.quadMaterials),
-                create(scene.mediumInts), create(scene.mediumFloats), create(scene.lights),
-                create(scene.materialInts), create(scene.materialFloats),
-                create(scene.textureInts), create(scene.textureFloats),
-                createBytes(scene.textureImages),
-                create(scene.perlinVectors), create(scene.perlinPermutations)
-            )
+            cameraBuffer = create(FloatArray(CAMERA_FLOATS), buffers)
+            sceneArguments = upload(initialScene)
             // Read as well as written: every slice of samples after the first adds to it.
             outputs = List(2) { createOutput(maxPixels * 3L * Float.SIZE_BYTES) }
         } catch (t: Throwable) {
             close()
             throw t
+        }
+    }
+
+    /**
+     * Swaps the scene for [next]: its buffers replace the old ones, and the kernels are kept -
+     * only pointed at the new buffers - unless [next] needs other features compiled in.
+     */
+    fun replaceScene(next: SceneBuffers) {
+        clFinish(cl.queue)
+        sceneMemory.forEach { clReleaseMemObject(it) }
+        sceneMemory.clear()
+        scene = next
+        sceneArguments = upload(next)
+        val nextDefines = next.kernelDefines()
+        val nextMedia = next.mediumCount > 0
+        if (nextDefines != defines || nextMedia != hasMedia) {
+            releasePrograms()
+            defines = nextDefines
+            hasMedia = nextMedia
+        } else {
+            programs.values.forEach { (_, kernel) -> bindScene(kernel) }
         }
     }
 
@@ -118,7 +138,7 @@ class GpuSession(private val scene: SceneBuffers, maxPixels: Int) : AutoCloseabl
         val start = System.nanoTime()
         // -Drt.cl.options adds compiler flags for experiments, e.g. -cl-nv-verbose.
         val extra = System.getProperty("rt.cl.options") ?: ""
-        val options = listOf(BUILD_OPTIONS, scene.kernelDefines(), "-DAOV_MODE=$mode", registerCap(extra), extra)
+        val options = listOf(BUILD_OPTIONS, defines, "-DAOV_MODE=$mode", registerCap(extra), extra)
             .joinToString(" ").trim()
         val program = cl.buildProgram(GpuRenderer.kernelSource(), options)
         val kernel = MemoryStack.stackPush().use { stack ->
@@ -127,12 +147,16 @@ class GpuSession(private val scene: SceneBuffers, maxPixels: Int) : AutoCloseabl
             OpenClContext.check(errcode, "clCreateKernel")
             handle
         }
-        sceneArguments.forEachIndexed { i, buffer ->
-            OpenClContext.check(clSetKernelArg1p(kernel, i, buffer), "clSetKernelArg($i)")
-        }
+        bindScene(kernel)
         System.err.println("[gpu] built the ${MODE_NAMES[mode]} kernel in ${(System.nanoTime() - start) / 1_000_000} ms")
         program to kernel
     }.second
+
+    private fun bindScene(kernel: Long) {
+        sceneArguments.forEachIndexed { i, buffer ->
+            OpenClContext.check(clSetKernelArg1p(kernel, i, buffer), "clSetKernelArg($i)")
+        }
+    }
 
     /**
      * Left alone, NVIDIA's compiler gives the kernel ~100-128 registers, which fits only a
@@ -142,32 +166,52 @@ class GpuSession(private val scene: SceneBuffers, maxPixels: Int) : AutoCloseabl
      */
     private fun registerCap(extra: String): String {
         if (!cl.extensions.contains("cl_nv_compiler_options") || extra.contains("maxrregcount")) return ""
-        return "-cl-nv-maxrregcount=${if (scene.mediumCount > 0) 72 else 64}"
+        return "-cl-nv-maxrregcount=${if (hasMedia) 72 else 64}"
     }
 
-    override fun close() {
+    private fun releasePrograms() {
         programs.values.forEach { (program, kernel) ->
             clReleaseKernel(kernel)
             clReleaseProgram(program)
         }
+        programs.clear()
+    }
+
+    override fun close() {
+        releasePrograms()
+        sceneMemory.forEach { clReleaseMemObject(it) }
         buffers.forEach { clReleaseMemObject(it) }
         cl.close()
         keepAwake?.close()
     }
 
+    /** The camera buffer, then every scene buffer, in the kernel's argument order. */
+    private fun upload(s: SceneBuffers): List<Long> = listOf(
+        cameraBuffer,
+        create(s.nodes), create(s.leaves), create(s.refs),
+        create(s.spheres), create(s.sphereMaterials),
+        create(s.triangles), create(s.triangleMaterials),
+        create(s.quads), create(s.quadMaterials),
+        create(s.mediumInts), create(s.mediumFloats), create(s.lights),
+        create(s.materialInts), create(s.materialFloats),
+        create(s.textureInts), create(s.textureFloats),
+        createBytes(s.textureImages),
+        create(s.perlinVectors), create(s.perlinPermutations)
+    )
+
     // OpenCL rejects zero-sized buffers, so empty sections get one padding element.
-    private fun create(data: FloatArray): Long {
+    private fun create(data: FloatArray, into: MutableList<Long> = sceneMemory): Long {
         val errcode = IntArray(1)
         val buffer = clCreateBuffer(cl.context, READ_FLAGS, if (data.isEmpty()) FloatArray(1) else data, errcode)
         OpenClContext.check(errcode, "clCreateBuffer")
-        return buffer.also { buffers += it }
+        return buffer.also { into += it }
     }
 
     private fun create(data: IntArray): Long {
         val errcode = IntArray(1)
         val buffer = clCreateBuffer(cl.context, READ_FLAGS, if (data.isEmpty()) IntArray(1) else data, errcode)
         OpenClContext.check(errcode, "clCreateBuffer")
-        return buffer.also { buffers += it }
+        return buffer.also { sceneMemory += it }
     }
 
     private fun createBytes(data: ByteArray): Long {
@@ -177,7 +221,7 @@ class GpuSession(private val scene: SceneBuffers, maxPixels: Int) : AutoCloseabl
             val errcode = IntArray(1)
             val buffer = clCreateBuffer(cl.context, READ_FLAGS, native, errcode)
             OpenClContext.check(errcode, "clCreateBuffer(images)")
-            return buffer.also { buffers += it }
+            return buffer.also { sceneMemory += it }
         } finally {
             MemoryUtil.memFree(native)
         }
@@ -206,11 +250,12 @@ class GpuSession(private val scene: SceneBuffers, maxPixels: Int) : AutoCloseabl
     )
 
     companion object {
-        /** Kernel modes (AOV_MODE): the image, then the denoiser's albedo and normal guides. */
+        /** Kernel modes (AOV_MODE): the image, the denoiser's albedo and normal guides, and the quick shaded look. */
         const val MODE_IMAGE = 0
         const val MODE_ALBEDO = 1
         const val MODE_NORMAL = 2
-        private val MODE_NAMES = listOf("image", "albedo guide", "normal guide")
+        const val MODE_SHADED = 3
+        private val MODE_NAMES = listOf("image", "albedo guide", "normal guide", "shaded preview")
 
         /** Output targets: the image, and the scratch buffer the guides use. */
         const val IMAGE = 0

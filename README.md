@@ -23,7 +23,14 @@ mvn compile
 mvn exec:java -Drt.gui -Drt.scene=cornell-final
 ```
 
-Otworzy się okno ze sceną. Obraz liczy się od razu i wyostrza w miarę zbierania próbek.
+Otworzy się okno ze sceną w **szybkim podglądzie** – trybie do ustawiania sceny: jeden promień na
+piksel, kolory powierzchni bez odbić i cieni, szkło półprzezroczyste (widać, co stoi za kulą).
+Obraz jest od razu ostry w pełnej rozdzielczości, a przesuwanie, obracanie i skalowanie modeli –
+także takich z setkami tysięcy trójkątów – odświeża się w ułamku sekundy.
+
+Klawisz **T** (albo *Tryb* w panelu) przełącza na **ray tracing**: pełne oświetlenie, szkło, cienie,
+obraz wyostrza się w miarę zbierania próbek i jest odszumiany. `-Drt.gui.raytrace` otwiera okno
+od razu w tym trybie.
 
 Kilka przydatnych wariantów:
 
@@ -61,6 +68,7 @@ Pełna lista jest też w oknie pod **F1** (albo **H**, albo przycisk *Pomoc* w p
 | Obrót kamery wokół punktu, na który patrzy | lewy przycisk myszy + przeciąganie |
 | Przesuwanie kamery | Shift + lewy przycisk + przeciąganie, albo środkowy przycisk |
 | Przybliżanie / oddalanie | kółko myszy albo prawy przycisk + przeciąganie |
+| Szybki podgląd / ray tracing | `T` |
 | Kąt widzenia | `+` / `-` |
 | Reset widoku | `R` |
 | Przestaw zaznaczony model – żółty zarys pokazuje, gdzie stanie (podłoga, kolumna, kula, inny model; przy ścianie u jej stóp) | Ctrl + przeciąganie albo Ctrl + klik |
@@ -73,12 +81,13 @@ Pełna lista jest też w oknie pod **F1** (albo **H**, albo przycisk *Pomoc* w p
 | Pomoc | `F1` / `H` |
 | Zamknij | `Esc` |
 
-Podczas ruchu kamery podgląd liczy się w 1/4 rozdzielczości przy 1 próbce na piksel, żeby był płynny.
-Po zatrzymaniu (150 ms) obraz przechodzi na pełną rozdzielczość, zbiera próbki do celu ustawionego
-w panelu i jest odszumiany przy 16, 64, 256… próbkach oraz na końcu.
+W trybie ray tracing podczas ruchu kamery podgląd liczy się w 1/4 rozdzielczości przy 1 próbce na
+piksel, żeby był płynny. Po zatrzymaniu (150 ms) obraz przechodzi na pełną rozdzielczość, zbiera
+próbki do celu ustawionego w panelu i jest odszumiany przy 16, 64, 256… próbkach oraz na końcu.
 
 ## Panel boczny
 
+- **Tryb** – szybki podgląd albo ray tracing (to samo co `T`).
 - **Obraz** – gotowe rozdzielczości albo własna szerokość i wysokość (*Zastosuj rozdzielczość*),
   **Cel spp** (liczba próbek, przy której render się kończy) z paskiem postępu, odszumianie, zapis.
 - **Światła** – lampa sufitowa i światło przednie do włączania i wyłączania.

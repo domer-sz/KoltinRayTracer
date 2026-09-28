@@ -71,6 +71,20 @@ class LightSamplingTest {
     }
 
     @Test
+    fun `a sphere seen from inside samples every direction with a finite density`() {
+        // A model standing inside the glass sphere, which the scene also aims samples at.
+        val around = Sphere(Point(0.2f, 0.1f, 0f), 1f, white)
+        assertEquals(1.0, integrate(around), 0.05)
+        seeded {
+            repeat(200) {
+                val direction = around.random(origin)
+                val density = around.pdfValue(origin, direction)
+                assertTrue(density.isFinite() && density > 0f, "density $density for $direction")
+            }
+        }
+    }
+
+    @Test
     fun `the density falls off with distance and with a glancing angle`() {
         val close = quad.pdfValue(origin, Vector(0f, 1f, 0f))
         val far = Quad(Point(-1f, 8f, -1f), Vector(2f, 0f, 0f), Vector(0f, 0f, 2f), white)

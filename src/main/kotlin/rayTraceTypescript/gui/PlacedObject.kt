@@ -2,6 +2,8 @@ package rayTraceTypescript.gui
 
 import rayTraceTypescript.Color
 import rayTraceTypescript.Vector
+import rayTraceTypescript.gpu.MeshBlock
+import rayTraceTypescript.gpu.PlacedMesh
 import rayTraceTypescript.materials.Dielectric
 import rayTraceTypescript.materials.DiffuseLight
 import rayTraceTypescript.materials.Lambertian
@@ -136,10 +138,7 @@ class PlacedObject(val name: String, val shape: Shape) : SceneEntry {
     fun hittable(): Hittable {
         val m = material.material()
         return when (shape) {
-            is Shape.Model -> HittableList(
-                shapedMesh(shape.mesh).transformed(1.0f, Vector(0f, 0f, 0f), Vector(x.toFloat(), y.toFloat(), z.toFloat()))
-                    .toHittables(m).toMutableList()
-            )
+            is Shape.Model -> placedMesh(shape.mesh, m)
             Shape.Ball -> Sphere(Point(x.toFloat(), (y + height / 2).toFloat(), z.toFloat()), (height / 2).toFloat(), m)
             Shape.Block -> Translate(
                 RotateY(
@@ -153,6 +152,50 @@ class PlacedObject(val name: String, val shape: Shape) : SceneEntry {
                 Vector(x.toFloat(), y.toFloat(), z.toFloat())
             )
         }
+    }
+
+    @Volatile private var blockZUp: Boolean? = null
+    @Volatile private var block: MeshBlock? = null
+
+    /** The model stood up, with its own GPU tree; built again only when [zUp] changes. */
+    private fun block(mesh: Mesh): MeshBlock {
+        block?.let { if (blockZUp == zUp) return it }
+        return MeshBlock(if (zUp) mesh.zUpToYUp() else mesh).also {
+            block = it
+            blockZUp = zUp
+        }
+    }
+
+    /**
+     * The model placed as [shapedMesh] places it - turned, scaled to [height], the turned
+     * footprint centred on (x, z) and its lowest point at y - but as a transform of the cached
+     * [MeshBlock], so moving, turning or resizing it builds no new tree.
+     */
+    private fun placedMesh(mesh: Mesh, material: Material): Hittable {
+        val b = block(mesh)
+        val radians = Math.toRadians(rotation)
+        val c = kotlin.math.cos(radians).toFloat()
+        val s = kotlin.math.sin(radians).toFloat()
+        var minX = Float.POSITIVE_INFINITY; var maxX = Float.NEGATIVE_INFINITY
+        var minZ = Float.POSITIVE_INFINITY; var maxZ = Float.NEGATIVE_INFINITY
+        val v = b.mesh.vertices
+        var i = 0
+        while (i < v.size) {
+            val tx = c * v[i] + s * v[i + 2]
+            val tz = -s * v[i] + c * v[i + 2]
+            if (tx < minX) minX = tx; if (tx > maxX) maxX = tx
+            if (tz < minZ) minZ = tz; if (tz > maxZ) maxZ = tz
+            i += 3
+        }
+        val minY = b.bounds.y.min
+        val tall = b.bounds.y.max - minY
+        val scale = if (tall > 0f) (height / tall).toFloat() else 1.0f
+        val offset = Vector(
+            x.toFloat() - (minX + maxX) / 2 * scale,
+            y.toFloat() - minY * scale,
+            z.toFloat() - (minZ + maxZ) / 2 * scale
+        )
+        return PlacedMesh(b, scale, rotation.toFloat(), offset, material)
     }
 
     /** The mesh stood up, turned and scaled, its footprint centred on the origin at y = 0. */

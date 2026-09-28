@@ -40,7 +40,8 @@ object HelpDialog {
             "Panel: Światło przednie" to "Włącz / wyłącz panel doświetlający przód sceny"
         ),
         "Obraz" to listOf(
-            "D" to "Odszumianie włącz / wyłącz",
+            "T" to "Szybki podgląd (domyślny, do ustawiania sceny) / ray tracing",
+            "D" to "Odszumianie włącz / wyłącz (ray tracing)",
             "S" to "Zapisz obraz (PPM i PNG, z odszumioną kopią)",
             "Panel: rozdzielczość, Cel spp" to "Rozmiar obrazu i liczba próbek, przy której render się kończy"
         ),
@@ -52,7 +53,9 @@ object HelpDialog {
 
     private val html: String = buildString {
         append("<html><body style='font-family:sans-serif; font-size:11pt; margin:4px'>")
-        append("<p style='margin-top:0'>Podczas ruchu kamery podgląd liczy się w 1/4 rozdzielczości przy 1 spp; ")
+        append("<p style='margin-top:0'>Okno startuje w szybkim podglądzie: jeden promień na piksel, kolory powierzchni ")
+        append("bez odbić i cieni, szkło półprzezroczyste - obraz jest od razu ostry, a przesuwanie obiektów natychmiastowe. ")
+        append("T przełącza na ray tracing: podczas ruchu kamery 1/4 rozdzielczości przy 1 spp, ")
         append("po zatrzymaniu obraz dochodzi do pełnej jakości i jest odszumiany co 4× więcej próbek.</p>")
         for ((title, rows) in sections) {
             append("<h3 style='margin-bottom:4px'>$title</h3><table cellspacing='0' cellpadding='3'>")

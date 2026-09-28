@@ -33,6 +33,9 @@ internal class BvhBuilder {
     private val binBounds = FloatArray(BINS * 6)
     private val rightAreas = FloatArray(BINS)
 
+    /** How deep each grafted tree goes, by its root node. */
+    private val graftDepths = HashMap<Int, Int>()
+
     /** Builds a tree over [primitives] and returns the index of its root node. */
     fun build(primitives: PrimitiveRefs): Int {
         prims = primitives
@@ -44,6 +47,14 @@ internal class BvhBuilder {
         }
 
         val root = allocateNode()
+        if (n == 1 && primitives.kinds[0] == SUBTREE) {
+            // A lone grafted tree still hangs below a root of its own, beside an empty leaf.
+            val box = rangeBounds(0, 1)
+            val grafted = primitives.indices[0]
+            writeNode(root, box, grafted, box, emptyLeaf())
+            maxDepth = maxOf(maxDepth, 1 + (graftDepths[grafted] ?: 0))
+            return root
+        }
         val mid = findSplit(0, n, forceSplit = n > 1)
         if (mid < 0) {
             // Too few primitives to split: one leaf, and an empty leaf with the same box beside it.
@@ -67,7 +78,14 @@ internal class BvhBuilder {
     }
 
     private fun child(start: Int, end: Int, depth: Int): Int {
-        val mid = findSplit(start, end, forceSplit = end - start > MAX_LEAF)
+        if (end - start == 1 && prims.kinds[order[start]] == SUBTREE) {
+            // A grafted tree is a child as it is; its root node is already in [nodes].
+            val grafted = prims.indices[order[start]]
+            maxDepth = maxOf(maxDepth, depth - 1 + (graftDepths[grafted] ?: 0))
+            return grafted
+        }
+        // A grafted tree cannot share a leaf, so a range holding one is split down to it.
+        val mid = findSplit(start, end, forceSplit = end - start > MAX_LEAF || holdsSubtree(start, end))
         if (mid < 0) return makeLeaf(start, end)
         val node = allocateNode()
         fillNode(node, start, mid, end, depth)
@@ -155,6 +173,75 @@ internal class BvhBuilder {
         return if (i == start || i == end) start + count / 2 else i
     }
 
+    private fun holdsSubtree(start: Int, end: Int): Boolean {
+        for (i in start until end) if (prims.kinds[order[i]] == SUBTREE) return true
+        return false
+    }
+
+    /**
+     * Copies [placed]'s tree into these buffers, its boxes scaled, turned and moved as the
+     * placement says, its triangles counted from [triangleBase]. Returns its root node, to be
+     * handed to [build] as one [SUBTREE] primitive.
+     */
+    fun graft(placed: PlacedMesh, triangleBase: Int): Int {
+        val block = placed.block
+        val nodeBase = nodes.size / NODE_INTS
+        val leafBase = leaves.size / 2
+        val refBase = refs.size / 2
+        val source = block.nodes
+        val box = FloatArray(6)
+        fun f(i: Int) = java.lang.Float.intBitsToFloat(i)
+        fun bits(v: Float) = java.lang.Float.floatToRawIntBits(v)
+        for (node in 0 until source.size / NODE_INTS) {
+            val at = node * NODE_INTS
+            val out = FloatArray(12)
+            // Child A's box, then child B's: x at 0-1 / 4-5, y at 2-3 / 6-7, z at 8-9 / 10-11.
+            for (child in 0 until 2) {
+                val x = at + child * 4
+                val z = at + 8 + child * 2
+                placedBox(placed, f(source[x]), f(source[x + 1]), f(source[x + 2]), f(source[x + 3]), f(source[z]), f(source[z + 1]), box)
+                out[child * 4] = box[0]; out[child * 4 + 1] = box[3]
+                out[child * 4 + 2] = box[1]; out[child * 4 + 3] = box[4]
+                out[8 + child * 2] = box[2]; out[9 + child * 2] = box[5]
+            }
+            for (k in 0 until 12) nodes.add(bits(out[k]))
+            for (k in 12 until 14) {
+                val code = source[at + k]
+                nodes.add(if (code >= 0) code + nodeBase else (code.inv() + leafBase).inv())
+            }
+            for (k in 14 until NODE_INTS) nodes.add(source[at + k])
+        }
+        for (i in block.leaves.indices step 2) {
+            leaves.add(block.leaves[i] + refBase)
+            leaves.add(block.leaves[i + 1])
+        }
+        for (i in block.refs.indices step 2) {
+            refs.add(block.refs[i])
+            refs.add(block.refs[i + 1] + triangleBase)
+        }
+        graftDepths[nodeBase] = block.maxDepth
+        return nodeBase
+    }
+
+    /** The box around a local box once placed: its four turned x/z corners, scaled and moved. */
+    private fun placedBox(p: PlacedMesh, minX: Float, maxX: Float, minY: Float, maxY: Float, minZ: Float, maxZ: Float, out: FloatArray) {
+        var loX = Float.POSITIVE_INFINITY; var hiX = Float.NEGATIVE_INFINITY
+        var loZ = Float.POSITIVE_INFINITY; var hiZ = Float.NEGATIVE_INFINITY
+        for (corner in 0 until 4) {
+            val x = if (corner and 1 == 0) minX else maxX
+            val z = if (corner and 2 == 0) minZ else maxZ
+            val tx = (p.cos * x + p.sin * z) * p.scale + p.offset.x
+            val tz = (-p.sin * x + p.cos * z) * p.scale + p.offset.z
+            if (tx < loX) loX = tx; if (tx > hiX) hiX = tx
+            if (tz < loZ) loZ = tz; if (tz > hiZ) hiZ = tz
+        }
+        // Rounding in the product could shave the box below the triangles moved the same way.
+        val slack = 1e-5f * maxOf(1.0f, kotlin.math.abs(p.scale) * (maxX - minX + maxY - minY + maxZ - minZ))
+        out[0] = loX - slack; out[3] = hiX + slack
+        out[1] = minY * p.scale + p.offset.y - slack; out[4] = maxY * p.scale + p.offset.y + slack
+        out[2] = loZ - slack; out[5] = hiZ + slack
+    }
+
     private fun binOf(value: Float, min: Float, scale: Float): Int =
         ((value - min) * scale).toInt().coerceIn(0, BINS - 1)
 
@@ -232,6 +319,8 @@ internal class BvhBuilder {
     companion object {
         const val NODE_INTS = SceneBuffers.NODE_INTS
         const val MAX_LEAF = 4
+        /** A primitive kind only [build] sees: a tree already grafted in, its index the root node. */
+        const val SUBTREE = -100
         private const val BINS = 16
         /**
          * Cost of testing a node's two boxes, relative to one primitive test. The GPU reads both

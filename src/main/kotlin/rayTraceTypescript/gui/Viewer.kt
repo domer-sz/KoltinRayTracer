@@ -59,9 +59,11 @@ import kotlin.math.tan
  * The panel beside the image ([ControlPanel]) sets the resolution and the sample target, and
  * adds, places and dresses models loaded from any format [MeshLoader] reads.
  *
- * While the camera moves it renders a quarter-size image at one sample per pixel, so motion
- * stays fluid; once it stops it renders the full image up to the sample target, denoising
- * every time the sample count quadruples and once more at the end.
+ * It opens in the quick look for setting the scene up: one ray per pixel, shaded by the
+ * surface's colour, at full size and sharp at once. T switches to ray tracing: while the camera
+ * moves it renders a quarter-size image at one sample per pixel, so motion stays fluid; once it
+ * stops it renders the full image up to the sample target, denoising every time the sample
+ * count quadruples and once more at the end.
  */
 class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
     private val base: Camera = scene.camera
@@ -103,6 +105,11 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
         set(value) { field = value; touch() }
     @Volatile var targetSamples = maxOf(base.samplesPerPixel, DEFAULT_TARGET)
     @Volatile var denoiseOn = true
+    /**
+     * Ray tracing, or (the default, for setting the scene up) the quick look: one ray per pixel
+     * shaded by the surface's colour, sharp at once. -Drt.gui.raytrace opens in ray tracing.
+     */
+    @Volatile var raytrace = System.getProperty("rt.gui.raytrace") != null
     @Volatile private var lastInput = 0L
     @Volatile private var dragging = false
     @Volatile private var running = true
@@ -319,14 +326,27 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
 
     private fun renderLoop() {
         var session: GpuSession? = null
+        var capacity = 0
         try {
             GpuRenderer.requestedDenoiser().use { denoiser ->
                 loop(denoiser) { pixels ->
-                    session?.close()
-                    session = null
-                    status = "Przygotowuję scenę (dodane obiekty: ${objects.size})…"
-                    panel.repaint()
-                    GpuSession(SceneFlattener.flatten(buildWorld(), activeLights()), pixels).also { session = it }
+                    val start = System.nanoTime()
+                    val buffers = SceneFlattener.flatten(buildWorld(), activeLights())
+                    val flattened = System.nanoTime()
+                    val current = session
+                    // An edited scene goes into the session there is; a bigger image needs a new one.
+                    val next = if (current != null && pixels <= capacity) {
+                        current.also { it.replaceScene(buffers) }
+                    } else {
+                        current?.close()
+                        session = null
+                        GpuSession(buffers, pixels).also {
+                            session = it
+                            capacity = pixels
+                        }
+                    }
+                    System.err.println("[viewer] scene rebuilt: flatten ${(flattened - start) / 1_000_000} ms, upload ${(System.nanoTime() - flattened) / 1_000_000} ms")
+                    next
                 }
             }
         } catch (t: Throwable) {
@@ -345,6 +365,7 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
 
         var accumulated: View? = null
         var accumulatedSize: Resolution? = null
+        var accumulatedRaytrace = false
         var setup: CameraSetup? = null
         var pixels = FloatArray(0)
         var samples = 0
@@ -370,6 +391,41 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
             }
 
             val current = view
+            if (!raytrace) {
+                // The quick look: full size from the first frame, a few jittered rays per pixel
+                // added while the view holds still to smooth the edges, then idle.
+                if (current !== accumulated || size != accumulatedSize || accumulatedRaytrace) {
+                    setup = setup(current, size)
+                    session.setCamera(setup)
+                    pixels = FloatArray(setup.totalPixels * 3)
+                    accumulated = current
+                    accumulatedSize = size
+                    accumulatedRaytrace = false
+                    samples = 0
+                }
+                val s = setup!!
+                if (samples < QUICK_SAMPLES || saveRequested) {
+                    val frameStart = System.nanoTime()
+                    if (samples < QUICK_SAMPLES) {
+                        session.launch(GpuSession.MODE_SHADED, s, samples, 1, 1.0f)
+                        samples++
+                    }
+                    session.read(GpuSession.IMAGE, pixels)
+                    show(
+                        toImage(pixels, s.imageWidth, s.imageHeight, 1.0f / samples),
+                        "szybki podgląd ${s.imageWidth}×${s.imageHeight} · T: ray tracing"
+                    )
+                    val shown = samples
+                    SwingUtilities.invokeLater { if (::controls.isInitialized) controls.showProgress(shown, QUICK_SAMPLES) }
+                    if (saveRequested) save(s, pixels, samples, null)
+                    val frameMs = (System.nanoTime() - frameStart) / 1_000_000
+                    if (frameMs < FRAME_MS) Thread.sleep(FRAME_MS - frameMs)
+                } else {
+                    Thread.sleep(FRAME_MS)
+                }
+                continue
+            }
+
             val moving = dragging || System.currentTimeMillis() - lastInput < SETTLE_MS
             if (moving) {
                 // Quarter size, one fresh sample: rough, but it follows the mouse.
@@ -391,12 +447,13 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
                 continue
             }
 
-            if (current !== accumulated || size != accumulatedSize) {
+            if (current !== accumulated || size != accumulatedSize || !accumulatedRaytrace) {
                 setup = setup(current, size)
                 session.setCamera(setup)
                 pixels = FloatArray(setup.totalPixels * 3)
                 accumulated = current
                 accumulatedSize = size
+                accumulatedRaytrace = true
                 samples = 0
                 slice = 1
                 nextDenoise = FIRST_DENOISE
@@ -713,6 +770,7 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
                 when (e.keyCode) {
                     KeyEvent.VK_R -> { view = initialView; touch() }
                     KeyEvent.VK_D -> { denoiseOn = !denoiseOn; controls.syncDenoise() }
+                    KeyEvent.VK_T -> { raytrace = !raytrace; controls.syncMode() }
                     KeyEvent.VK_S -> requestSave()
                     KeyEvent.VK_PLUS, KeyEvent.VK_ADD, KeyEvent.VK_EQUALS -> { view = view.with(vfov = (view.vfov - 2).coerceAtLeast(5.0)); touch() }
                     KeyEvent.VK_MINUS, KeyEvent.VK_SUBTRACT -> { view = view.with(vfov = (view.vfov + 2).coerceAtMost(120.0)); touch() }
@@ -879,12 +937,14 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
         /** How long after the last mouse or key move the full-size render takes over. */
         private const val SETTLE_MS = 150L
         /** How long after an object edit the scene is rebuilt, so a run of edits costs one rebuild. */
-        private const val REBUILD_DELAY_MS = 250L
+        private const val REBUILD_DELAY_MS = 80L
         private const val FRAME_MS = 16L
         private const val LAUNCH_MS = 40.0
         private const val DISPLAY_INTERVAL_NS = 100_000_000L
         private const val DEFAULT_TARGET = 1024
         private const val FIRST_DENOISE = 16
+        /** Rays per pixel the quick look gathers once the view holds still, for smooth edges. */
+        private const val QUICK_SAMPLES = 16
         private const val GUIDE_SAMPLES = 16
         private const val ORBIT_SPEED = 0.005
         private const val MAX_PITCH = 1.55
@@ -896,6 +956,6 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
         private const val UPWARD = 0.7
         private const val STATUS_HEIGHT = 44
         private const val HELP =
-            "F1 / H: wszystkie skróty · LPM obrót · Shift+LPM przesuwanie · kółko zoom · Ctrl+LPM postaw obiekt · S zapis"
+            "F1 / H: wszystkie skróty · T szybki podgląd / ray tracing · LPM obrót · Shift+LPM przesuwanie · kółko zoom · Ctrl+LPM postaw obiekt · S zapis"
     }
 }

@@ -4,6 +4,8 @@ import org.junit.jupiter.api.Assertions.assertTrue
 import org.junit.jupiter.api.Assumptions.assumeTrue
 import org.junit.jupiter.api.Test
 import rayTraceTypescript.gpu.GpuRenderer
+import rayTraceTypescript.gpu.MeshBlock
+import rayTraceTypescript.gpu.PlacedMesh
 import rayTraceTypescript.materials.Dielectric
 import rayTraceTypescript.materials.DiffuseLight
 import rayTraceTypescript.materials.Lambertian
@@ -94,6 +96,50 @@ class GpuCpuComparisonTest {
     fun `gpu matches the cpu render for an stl mesh`() {
         assumeOpenCl()
         assertLooksTheSame(meshScene())
+    }
+
+    @Test
+    fun `gpu matches the cpu render for placed mesh blocks`() {
+        assumeOpenCl()
+        // One prebuilt tree used three times - moved, turned and scaled - grafted into the
+        // scene's tree on the GPU, and triangles moved the ordinary way on the CPU.
+        val block = MeshBlock(octahedron())
+        val ground = Sphere(Point(0.0f, -1000.0f, 0.0f), 1000.0f, Lambertian(Color(0.6f, 0.6f, 0.62f)))
+        val world = HittableList(
+            mutableListOf(
+                ground,
+                PlacedMesh(block, 1.0f, 0.0f, Vector(-1.4f, 0.0f, 0.2f), Lambertian(Color(0.72f, 0.38f, 0.22f))),
+                PlacedMesh(block, 0.6f, 37.0f, Vector(0.3f, 0.0f, 0.9f), Metal(Color(0.7f, 0.7f, 0.75f), 0.1f)),
+                PlacedMesh(block, 1.4f, -110.0f, Vector(1.2f, 0.3f, -0.8f), Lambertian(Color(0.2f, 0.4f, 0.7f)))
+            )
+        )
+        assertLooksTheSame(world)
+    }
+
+    @Test
+    fun `gpu matches the cpu render for placed mesh blocks lit by a lamp`() {
+        assumeOpenCl()
+        val block = MeshBlock(octahedron())
+        val light = Quad(
+            Point(-1.5f, 3.0f, -1.5f), Vector(3.0f, 0.0f, 0.0f), Vector(0.0f, 0.0f, 3.0f),
+            DiffuseLight(Color(6.0f, 6.0f, 6.0f))
+        )
+        val world = HittableList(
+            mutableListOf(
+                Sphere(Point(0.0f, -1000.0f, 0.0f), 1000.0f, Lambertian(Color(0.6f, 0.6f, 0.62f))),
+                PlacedMesh(block, 1.0f, 45.0f, Vector(-0.8f, 0.0f, 0.2f), Lambertian(Color(0.72f, 0.38f, 0.22f))),
+                PlacedMesh(block, 0.7f, 10.0f, Vector(0.9f, 0.0f, -0.3f), Lambertian(Color(0.2f, 0.4f, 0.7f))),
+                light
+            )
+        )
+        assertLooksTheSame(world, lit = true, lights = light)
+    }
+
+    @Test
+    fun `gpu matches the cpu render for a lone placed mesh block`() {
+        assumeOpenCl()
+        val world = PlacedMesh(MeshBlock(octahedron()), 1.2f, 20.0f, Vector(0.0f, 0.0f, 0.0f), Lambertian(Color(0.72f, 0.38f, 0.22f)))
+        assertLooksTheSame(world)
     }
 
     @Test
@@ -261,21 +307,23 @@ class GpuCpuComparisonTest {
             1000.0f,
             Lambertian(CheckerTexture(0.32f, Color(0.2f, 0.3f, 0.1f), Color(0.9f, 0.9f, 0.9f)))
         )
-        val octahedron = Mesh(
-            floatArrayOf(
-                1f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, 1f,
-                0f, 1f, 0f, -1f, 0f, 0f, 0f, 0f, 1f,
-                -1f, 0f, 0f, 0f, -1f, 0f, 0f, 0f, 1f,
-                0f, -1f, 0f, 1f, 0f, 0f, 0f, 0f, 1f,
-                0f, 1f, 0f, 1f, 0f, 0f, 0f, 0f, -1f,
-                -1f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, -1f,
-                0f, -1f, 0f, -1f, 0f, 0f, 0f, 0f, -1f,
-                1f, 0f, 0f, 0f, -1f, 0f, 0f, 0f, -1f
-            )
-        ).standingOnFloor()
-        val facets = octahedron.toHittables(Lambertian(Color(0.72f, 0.38f, 0.22f)))
+        val facets = octahedron().toHittables(Lambertian(Color(0.72f, 0.38f, 0.22f)))
         return HittableList(mutableListOf(BvhNode(HittableList((listOf(ground) + facets).toMutableList()))))
     }
+
+    /** A unit octahedron standing on y = 0, the default model placement. */
+    private fun octahedron(): Mesh = Mesh(
+        floatArrayOf(
+            1f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, 1f,
+            0f, 1f, 0f, -1f, 0f, 0f, 0f, 0f, 1f,
+            -1f, 0f, 0f, 0f, -1f, 0f, 0f, 0f, 1f,
+            0f, -1f, 0f, 1f, 0f, 0f, 0f, 0f, 1f,
+            0f, 1f, 0f, 1f, 0f, 0f, 0f, 0f, -1f,
+            -1f, 0f, 0f, 0f, 1f, 0f, 0f, 0f, -1f,
+            0f, -1f, 0f, -1f, 0f, 0f, 0f, 0f, -1f,
+            1f, 0f, 0f, 0f, -1f, 0f, 0f, 0f, -1f
+        )
+    ).standingOnFloor()
 
     private fun imageTextureScene(): Hittable {
         val globe = Sphere(Point(0.0f, 0.5f, 0.0f), 1.2f, Lambertian(ImageTexture(syntheticImage())))

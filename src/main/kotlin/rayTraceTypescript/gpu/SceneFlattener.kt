@@ -133,6 +133,10 @@ class SceneFlattener private constructor() {
                 val box = quad.aabbBoundingBox()
                 refs.add(SceneBuffers.LEAF_QUAD, index, box.x.min, box.y.min, box.z.min, box.x.max, box.y.max, box.z.max)
             }
+            is PlacedMesh -> {
+                require(transform === Transform.IDENTITY) { "A placed mesh carries its own placement" }
+                collectPlaced(hittable, refs)
+            }
             is ConstantMedium -> collectMedium(hittable, transform, refs)
             is Translate -> collect(hittable.obj, transform.after(Transform.translation(hittable.offset)), refs)
             is RotateY -> collect(hittable.obj, transform.after(Transform.rotation(hittable.cosTheta, hittable.sinTheta)), refs)
@@ -144,6 +148,46 @@ class SceneFlattener private constructor() {
             is HittableList -> hittable.objects.forEach { collect(it, transform, refs) }
             else -> throw IllegalArgumentException("Unsupported hittable for GPU rendering: ${hittable::class.java.name}")
         }
+    }
+
+    /**
+     * A placed [MeshBlock]: its triangles copied in moved, and its prebuilt tree grafted in whole
+     * as one primitive of the scene's tree - no tree is built over its triangles again.
+     */
+    private fun collectPlaced(placed: PlacedMesh, refs: PrimitiveRefs) {
+        val block = placed.block
+        val base = triangleMaterials.size
+        val material = registerMaterial(placed.material)
+        val source = block.triangles
+        val stride = SceneBuffers.TRIANGLE_STRIDE
+        val c = placed.cos
+        val s = placed.sin
+        val k = placed.scale
+        val o = placed.offset
+        for (t in 0 until block.triangleCount) {
+            val at = t * stride
+            // v0 is a point, the two edges are directions: only v0 moves by the offset.
+            for (part in 0 until 3) {
+                val x = source[at + part * 4]
+                val y = source[at + part * 4 + 1]
+                val z = source[at + part * 4 + 2]
+                val point = part == 0
+                triangles.add((c * x + s * z) * k + if (point) o.x else 0.0f)
+                triangles.add(y * k + if (point) o.y else 0.0f)
+                triangles.add((-s * x + c * z) * k + if (point) o.z else 0.0f)
+                triangles.add(0.0f)
+            }
+            triangleMaterials.add(material)
+        }
+        val root = bvh.graft(placed, base)
+        // Its box is what its root's two children cover, so the tree above holds them whole.
+        val at = root * BvhBuilder.NODE_INTS
+        fun f(k: Int) = java.lang.Float.intBitsToFloat(bvh.nodes[at + k])
+        refs.add(
+            BvhBuilder.SUBTREE, root,
+            minOf(f(0), f(4)), minOf(f(2), f(6)), minOf(f(8), f(10)),
+            maxOf(f(1), f(5)), maxOf(f(3), f(7)), maxOf(f(9), f(11))
+        )
     }
 
     /**

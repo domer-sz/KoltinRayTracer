@@ -58,6 +58,8 @@
 
 // 0 renders the image. 1 or 2 render a denoiser guide instead, averaged over the pixel like the
 // image: the albedo (1) or the normal (2) of whatever the camera ray hits first.
+/** Glass surfaces the quick look (AOV_MODE 3) sees through, and the one it stops at. */
+#define PREVIEW_LAYERS 5
 #ifndef AOV_MODE
 #define AOV_MODE 0
 #endif
@@ -715,6 +717,24 @@ inline float3 aov_albedo(__global const int* matI,
     return clamp(colour, 0.0f, 1.0f);
 }
 
+/**
+ * The quick look for setting a scene up (AOV_MODE 3): the first surface's own colour under a
+ * light at the camera, plus a little from above so floors and tops stand apart from walls.
+ * No bounces, so no noise to wait out. Lights show flat in their colour, glass pale blue.
+ */
+inline float3 preview_shade(__global const int* matI,
+                            __global const int* texI, __global const float* texF,
+                            __global const uchar* images,
+                            __global const float* perlinVectors, __global const int* perlinPermutations,
+                            const HitRecord* rec, float3 direction) {
+    int type = matI[rec->material * 2];
+    float3 colour = aov_albedo(matI, texI, texF, images, perlinVectors, perlinPermutations, rec);
+    if (type == 3) return colour;
+    if (type == 2) colour = (float3)(0.70f, 0.82f, 0.92f);
+    float facing = fabs(dot(rec->normal, direction)) / length(direction);
+    return colour * (0.18f + 0.62f * facing + 0.2f * fmax(rec->normal.y, 0.0f));
+}
+
 // ---------------------------------------------------------------- sampling the lights
 
 /** A direction from [origin] towards a random point on one of the lights, picked evenly. */
@@ -740,6 +760,8 @@ inline float3 light_random(__global const float* quads, __global const float* sp
     float radius = data[6];
     float3 toCentre = centre - origin;
     float distanceSquared = dot(toCentre, toCentre);
+    // From inside - an object standing in a glass sphere - the sphere is all around.
+    if (distanceSquared <= radius * radius) return random_unit_vector(rng);
 
     float3 u, v, w;
     onb_build(toCentre, &u, &v, &w);
@@ -778,8 +800,12 @@ inline float light_pdf_value(const Scene* sc, __global const int* lights, int li
             float radius = data[6];
             float3 toCentre = centre - origin;
             float distanceSquared = dot(toCentre, toCentre);
-            float cosThetaMax = sqrt(1.0f - radius * radius / distanceSquared);
-            float solidAngle = 2.0f * M_PI_F * (1.0f - cosThetaMax);
+            // Seen from inside it covers every direction; outside, the cone it fills.
+            float solidAngle = 4.0f * M_PI_F;
+            if (distanceSquared > radius * radius) {
+                float cosThetaMax = sqrt(1.0f - radius * radius / distanceSquared);
+                solidAngle = 2.0f * M_PI_F * (1.0f - cosThetaMax);
+            }
             sum += weight / solidAngle;
         }
     }
@@ -891,6 +917,37 @@ __kernel void render(__global const float* restrict cam,
             sampleColor = (float3)(0.0f, 0.0f, 0.0f);
             depth = 0;
             fresh = false;
+        }
+
+        if (AOV_MODE == 3) {
+            // The quick look. Glass is not refracted but seen through, tinted a little at each
+            // surface, so what stands behind it can still be placed.
+            float3 shaded = (float3)(0.0f, 0.0f, 0.0f);
+            float3 carried = (float3)(1.0f, 1.0f, 1.0f);
+            for (int layer = 0; layer < PREVIEW_LAYERS; layer++) {
+                HitRecord hit;
+                if (!world_hit(&scene, rootNode, origin, direction, time, 0.001f, INFINITY, &rng, &hit)) {
+                    float3 sky = background;
+                    if (!flatBackground) {
+                        float alpha = 0.5f * (direction.y / length(direction) + 1.0f);
+                        sky = (float3)(1.0f, 1.0f, 1.0f) * (1.0f - alpha) + (float3)(0.5f, 0.7f, 1.0f) * alpha;
+                    }
+                    shaded += carried * sky;
+                    break;
+                }
+                float3 surface = preview_shade(matI, texI, texF, images, perlinVectors, perlinPermutations, &hit, direction);
+                if (matI[hit.material * 2] != 2 || layer == PREVIEW_LAYERS - 1) {
+                    shaded += carried * surface;
+                    break;
+                }
+                shaded += carried * 0.25f * surface;
+                carried *= 0.75f;
+                origin = hit.point;
+            }
+            pixelColor += shaded;
+            sample++;
+            fresh = true;
+            continue;
         }
 
         if (AOV_MODE) {

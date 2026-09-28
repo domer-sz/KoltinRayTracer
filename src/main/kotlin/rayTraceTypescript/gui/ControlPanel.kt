@@ -7,6 +7,7 @@ import java.awt.GridBagLayout
 import java.awt.Insets
 import java.io.File
 import javax.swing.BorderFactory
+import javax.swing.ButtonGroup
 import javax.swing.DefaultListModel
 import javax.swing.JButton
 import javax.swing.JCheckBox
@@ -19,6 +20,7 @@ import javax.swing.JList
 import javax.swing.JOptionPane
 import javax.swing.JPanel
 import javax.swing.JProgressBar
+import javax.swing.JRadioButton
 import javax.swing.JScrollPane
 import javax.swing.JSpinner
 import javax.swing.ListSelectionModel
@@ -50,6 +52,8 @@ class ControlPanel(private val viewer: Viewer, private val frame: JFrame) : JPan
     private val applySize = JButton("Zastosuj rozdzielczość")
     private val target = JSpinner(SpinnerNumberModel(viewer.targetSamples, 1, 1_000_000, 64))
     private val progress = JProgressBar(0, 1000).apply { isStringPainted = true }
+    private val quick = JRadioButton("Szybki podgląd", !viewer.raytrace)
+    private val raytrace = JRadioButton("Ray tracing", viewer.raytrace)
     private val denoise = JCheckBox("Odszumianie (D)", viewer.denoiseOn)
     private val save = JButton("Zapisz obraz (S)")
 
@@ -93,6 +97,13 @@ class ControlPanel(private val viewer: Viewer, private val frame: JFrame) : JPan
 
     init {
         border = BorderFactory.createEmptyBorder(10, 10, 10, 10)
+
+        section("Tryb (T)")
+        ButtonGroup().apply { add(quick); add(raytrace) }
+        full(JPanel(GridBagLayout()).apply {
+            add(quick, GridBagConstraints().apply { weightx = 1.0; anchor = GridBagConstraints.WEST })
+            add(raytrace, GridBagConstraints().apply { weightx = 1.0; anchor = GridBagConstraints.WEST })
+        })
 
         section("Obraz")
         field("Gotowe", preset)
@@ -151,6 +162,8 @@ class ControlPanel(private val viewer: Viewer, private val frame: JFrame) : JPan
         }
         target.addChangeListener { viewer.targetSamples = target.value as Int }
         denoise.addActionListener { viewer.denoiseOn = denoise.isSelected }
+        quick.addActionListener { viewer.raytrace = false; syncMode() }
+        raytrace.addActionListener { viewer.raytrace = true; syncMode() }
         save.addActionListener { viewer.requestSave() }
 
         add.addActionListener { chooseModel() }
@@ -197,6 +210,7 @@ class ControlPanel(private val viewer: Viewer, private val frame: JFrame) : JPan
         addBall.addActionListener { viewer.addShape(Shape.Ball); refreshObjects() }
         addBlock.addActionListener { viewer.addShape(Shape.Block); refreshObjects() }
         refreshObjects()
+        syncMode()
     }
 
     /** Applies a field change to the selected object, unless the panel is filling its fields. */
@@ -311,6 +325,14 @@ class ControlPanel(private val viewer: Viewer, private val frame: JFrame) : JPan
 
     fun syncDenoise() {
         denoise.isSelected = viewer.denoiseOn
+    }
+
+    /** Shows the viewer's mode; the sample target and denoising only matter when ray tracing. */
+    fun syncMode() {
+        quick.isSelected = !viewer.raytrace
+        raytrace.isSelected = viewer.raytrace
+        target.isEnabled = viewer.raytrace
+        denoise.isEnabled = viewer.raytrace
     }
 
     private fun numberSpinner(step: Double) = JSpinner(SpinnerNumberModel(0.0, -1e6, 1e6, step)).apply {
