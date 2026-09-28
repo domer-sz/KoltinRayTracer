@@ -22,8 +22,8 @@ object HelpDialog {
             "R" to "Powrót do widoku startowego"
         ),
         "Obiekty" to listOf(
-            "Ctrl + przeciąganie (lub klik)" to "Przestaw zaznaczony model; żółty zarys pokazuje, gdzie stanie: na podłodze, kolumnie, kuli, innym modelu, przy ścianie u jej stóp",
-            "Strzałki" to "Przesuń zaznaczony model w lewo, w prawo, dalej, bliżej (względem kamery)",
+            "Ctrl + przeciąganie (lub klik)" to "Przestaw zaznaczony obiekt (dodany albo kolumnę, kulę sceny); żółty zarys pokazuje, gdzie stanie: na podłodze, kolumnie, kuli, innym modelu, przy ścianie u jej stóp",
+            "Strzałki" to "Przesuń zaznaczony obiekt - także kolumnę lub kulę sceny - w lewo, w prawo, dalej, bliżej (względem kamery)",
             "PageUp / PageDown" to "Podnieś / opuść zaznaczony model",
             "Q / E  lub  [ / ]" to "Obróć zaznaczony model o 15°",
             "Shift + strzałki, PageUp, PageDown" to "To samo, pięć razy większy krok",
@@ -33,7 +33,7 @@ object HelpDialog {
             "Panel: X, Y, Z, Obrót, Wysokość" to "Ustaw zaznaczony model",
             "Panel: Materiał - Gotowy" to "Szary, biały, czerwony, niebieski mat, szkło, diament, lustro, złoto, miedź, stal, świecący",
             "Panel: Materiał - Rodzaj, Kolor, parametr" to "Matowy, metal (chropowatość), szkło (wsp. załamania) lub świecący (moc)",
-            "Panel: Przywróć obiekty sceny" to "Wróć usunięte obiekty sceny na miejsce"
+            "Panel: Przywróć obiekty sceny" to "Wróć usunięte i przesunięte obiekty sceny na ich miejsca"
         ),
         "Światła" to listOf(
             "Panel: Lampa sufitowa" to "Włącz / wyłącz lampę pod sufitem",

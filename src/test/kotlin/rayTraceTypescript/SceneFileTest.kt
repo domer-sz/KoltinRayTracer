@@ -8,6 +8,7 @@ import org.junit.jupiter.api.io.TempDir
 import rayTraceTypescript.gui.MaterialKind
 import rayTraceTypescript.gui.MaterialSpec
 import rayTraceTypescript.gui.SavedObject
+import rayTraceTypescript.gui.SavedPart
 import rayTraceTypescript.gui.SavedScene
 import rayTraceTypescript.gui.SceneFile
 import java.io.File
@@ -26,7 +27,10 @@ class SceneFileTest {
             samples = 2048,
             raytrace = true,
             denoise = false,
-            parts = linkedMapOf("Lampa sufitowa" to true, "Światło przednie" to false, "Szklana kula" to false),
+            parts = listOf(
+                SavedPart("Lampa sufitowa", true), SavedPart("Światło przednie", false),
+                SavedPart("Szklana kula", true, doubleArrayOf(120.0, 0.0, 250.5), -30.0)
+            ),
             objects = listOf(
                 SavedObject("Ork\\z mieczem", "model", model, 292.0, 0.0, 277.5, 45.0, 145.6, 0.5, 0.5, true,
                     MaterialSpec(MaterialKind.METAL, 0.9f, 0.7f, 0.3f, 0.05)),
@@ -46,7 +50,10 @@ class SceneFileTest {
         assertEquals(listOf(800, 600, 2048), listOf(read.width, read.height, read.samples))
         assertTrue(read.raytrace)
         assertEquals(false, read.denoise)
-        assertEquals(saved.parts, read.parts)
+        assertEquals(saved.parts.map { it.name to it.enabled }, read.parts.map { it.name to it.enabled })
+        assertEquals(null, read.parts[0].position)
+        assertArrayEquals(doubleArrayOf(120.0, 0.0, 250.5), read.parts[2].position, 1e-9)
+        assertEquals(-30.0, read.parts[2].rotation)
         assertEquals(2, read.objects.size)
         val ork = read.objects[0]
         assertEquals("Ork\\z mieczem", ork.name)

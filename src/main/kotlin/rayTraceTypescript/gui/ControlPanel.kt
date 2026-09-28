@@ -92,9 +92,10 @@ class ControlPanel(private val viewer: Viewer, private val frame: JFrame) : JPan
     private val parameter = JSpinner(SpinnerNumberModel(0.0, 0.0, 100.0, 0.05))
     private val zUp = JCheckBox("Oś Z w górę (pliki do druku 3D)")
     private val info = JLabel(" ")
-    /** Fields only an added model has; the scene's own objects can only be removed. */
-    private val modelFields: List<Component> =
-        listOf(centre, posX, posY, posZ, turn, size, materialPreset, materialKind, colour, parameter, zUp)
+    /** Fields for anything that can be moved: an added object or one of the scene's own. */
+    private val placeFields: List<Component> = listOf(centre, posX, posY, posZ, turn)
+    /** Fields only an added object has: its size and what it is made of. */
+    private val modelFields: List<Component> = listOf(size, materialPreset, materialKind, colour, parameter, zUp)
 
     private var lastFolder: File? = File("../stls").takeIf { it.isDirectory } ?: File(".")
 
@@ -179,7 +180,7 @@ class ControlPanel(private val viewer: Viewer, private val frame: JFrame) : JPan
 
         add.addActionListener { chooseModel() }
         remove.addActionListener { viewer.selected?.let { viewer.removeObject(it); refreshObjects() } }
-        centre.addActionListener { viewer.selectedModel?.let { viewer.centreInView(it); refreshSelection() } }
+        centre.addActionListener { viewer.selectedMovable?.let { viewer.centreInView(it); refreshSelection() } }
         restore.addActionListener { viewer.restoreBuiltIns(); refreshObjects() }
         list.addListSelectionListener {
             if (!it.valueIsAdjusting && !syncing) {
@@ -187,10 +188,10 @@ class ControlPanel(private val viewer: Viewer, private val frame: JFrame) : JPan
                 refreshSelection()
             }
         }
-        posX.addChangeListener { edit { o -> o.x = posX.value as Double } }
-        posY.addChangeListener { edit { o -> o.y = posY.value as Double } }
-        posZ.addChangeListener { edit { o -> o.z = posZ.value as Double } }
-        turn.addChangeListener { edit { o -> o.rotation = turn.value as Double } }
+        posX.addChangeListener { move { o -> o.x = posX.value as Double } }
+        posY.addChangeListener { move { o -> o.y = posY.value as Double } }
+        posZ.addChangeListener { move { o -> o.z = posZ.value as Double } }
+        turn.addChangeListener { move { o -> o.rotation = turn.value as Double } }
         size.addChangeListener { edit { o -> o.height = size.value as Double } }
         materialPreset.addActionListener {
             if (syncing) return@addActionListener
@@ -224,7 +225,16 @@ class ControlPanel(private val viewer: Viewer, private val frame: JFrame) : JPan
         syncMode()
     }
 
-    /** Applies a field change to the selected object, unless the panel is filling its fields. */
+    /** Moves or turns the selected object - added or the scene's own - unless the panel is filling its fields. */
+    private fun move(change: (Movable) -> Unit) {
+        if (syncing) return
+        val o = viewer.selectedMovable ?: return
+        change(o)
+        viewer.sceneChanged()
+        restore.isEnabled = viewer.builtIns.any { !it.part.isLight && (!it.enabled || it.moved) }
+    }
+
+    /** Applies a field change to the selected added object, unless the panel is filling its fields. */
     private fun edit(change: (PlacedObject) -> Unit) {
         if (syncing) return
         val o = viewer.selectedModel ?: return
@@ -323,24 +333,31 @@ class ControlPanel(private val viewer: Viewer, private val frame: JFrame) : JPan
         refreshSelection()
     }
 
-    /** Fills the object fields from the selected model, or greys them out for anything else. */
+    /**
+     * Fills the fields from the selection: where it stands for anything movable, and size and
+     * material for an added object; greys out what does not apply.
+     */
     fun refreshSelection() {
         val o = viewer.selectedModel
+        val m = viewer.selectedMovable
         syncing = true
         remove.isEnabled = viewer.selected != null
+        placeFields.forEach { it.isEnabled = m != null }
         modelFields.forEach { it.isEnabled = o != null }
         // Only a loaded model can be stood up from z; only a block has its own width and depth.
         zUp.isEnabled = o?.isModel == true
         blockWidth.isEnabled = o?.shape == Shape.Block
         blockDepth.isEnabled = o?.shape == Shape.Block
-        restore.isEnabled = viewer.builtIns.any { !it.part.isLight && !it.enabled }
+        restore.isEnabled = viewer.builtIns.any { !it.part.isLight && (!it.enabled || it.moved) }
+        if (m != null) {
+            posX.value = m.x
+            posY.value = m.y
+            posZ.value = m.z
+            turn.value = m.rotation
+        }
         if (viewer.selected is BuiltInObject) {
-            info.text = "Obiekt sceny - można go tylko usunąć"
+            info.text = "Obiekt sceny - można go przesuwać, obracać i usunąć"
         } else if (o != null) {
-            posX.value = o.x
-            posY.value = o.y
-            posZ.value = o.z
-            turn.value = o.rotation
             size.value = o.height
             showMaterial(o.material)
             zUp.isSelected = o.zUp

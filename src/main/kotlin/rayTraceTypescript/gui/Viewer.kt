@@ -126,8 +126,10 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
     val builtIns: List<BuiltInObject> = scene.parts.map { BuiltInObject(it) }
     val lights: List<BuiltInObject> get() = builtIns.filter { it.part.isLight }
     @Volatile var selected: SceneEntry? = null
-    /** The selection when it is an added model - the only kind that can be moved. */
+    /** The selection when it is an added object - the only kind with a size and a material. */
     val selectedModel: PlacedObject? get() = selected as? PlacedObject
+    /** The selection when it can be moved: an added object, or one of the scene's own. */
+    val selectedMovable: Movable? get() = selected as? Movable
 
     /** What the object list shows: the scene's objects still in it, then the added models. */
     fun entries(): List<SceneEntry> = builtIns.filter { !it.part.isLight && it.enabled } + objects
@@ -263,9 +265,12 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
         sceneChanged()
     }
 
-    /** Puts every removed object of the scene back (lights keep their switches). */
+    /** Puts every removed or moved object of the scene back where it was (lights keep their switches). */
     fun restoreBuiltIns() {
-        builtIns.filter { !it.part.isLight }.forEach { it.enabled = true }
+        builtIns.filter { !it.part.isLight }.forEach {
+            it.enabled = true
+            it.returnHome()
+        }
         sceneChanged()
     }
 
@@ -275,7 +280,7 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
     }
 
     /** Stands [o] where the middle of the view meets its floor level, or under the view's target. */
-    fun centreInView(o: PlacedObject) {
+    fun centreInView(o: Movable) {
         val v = view
         val hit = floorPoint(v, 0.5, 0.5, o.y) ?: doubleArrayOf(v.target[0], o.y, v.target[2])
         o.x = hit[0]
@@ -334,7 +339,9 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
             samples = targetSamples,
             raytrace = raytrace,
             denoise = denoiseOn,
-            parts = builtIns.associate { it.part.name to it.enabled },
+            parts = builtIns.map { b ->
+                SavedPart(b.part.name, b.enabled, if (b.moved) doubleArrayOf(b.x, b.y, b.z) else null, b.rotation)
+            },
             objects = objects.map { o ->
                 val shape = when (o.shape) {
                     is Shape.Model -> "model"
@@ -407,7 +414,17 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
 
                 objects.clear()
                 objects.addAll(loaded)
-                builtIns.forEach { b -> s.parts[b.part.name]?.let { b.enabled = it } }
+                builtIns.forEach { b ->
+                    val saved = s.parts.firstOrNull { it.name == b.part.name } ?: return@forEach
+                    b.enabled = saved.enabled
+                    b.returnHome()
+                    saved.position?.let { p ->
+                        b.x = p[0]
+                        b.y = p[1]
+                        b.z = p[2]
+                        b.rotation = saved.rotation
+                    }
+                }
                 selected = null
                 targetSamples = s.samples.coerceAtLeast(1)
                 raytrace = s.raytrace
@@ -438,15 +455,18 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
         return HittableList(parts)
     }
 
-    /** The room and the parts of the scene switched on - everything but the added models. */
-    private fun sceneWithoutModels(): Hittable {
+    /**
+     * The room and the parts of the scene switched on, where they now stand - everything but the
+     * added models - leaving out [except] (the part being dragged, so it does not land on itself).
+     */
+    private fun sceneWithoutModels(except: SceneEntry? = null): Hittable {
         val world = scene.world
         val all = builtIns.map { it.part.hittable }
         val room = if (world is HittableList && all.isNotEmpty()) {
             HittableList(world.objects.filter { o -> all.none { it === o } }.toMutableList())
         } else world
         val parts = mutableListOf<Hittable>(room)
-        builtIns.filter { it.enabled }.forEach { parts += it.part.hittable }
+        builtIns.filter { it.enabled && it !== except }.forEach { parts += it.hittable() }
         return HittableList(parts)
     }
 
@@ -462,7 +482,7 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
             else -> h
         }
         val kept = listOfNotNull(base.lights?.let { strip(it) }) +
-            builtIns.filter { it.enabled }.mapNotNull { it.part.lightProxy }
+            builtIns.filter { it.enabled }.mapNotNull { it.lightProxy() }
         return kept.takeIf { it.isNotEmpty() }?.let { HittableList(it.toMutableList()) }
     }
 
@@ -759,7 +779,7 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
      * model - when that surface faces up (a floor, a block's top, a sphere's crown); on the floor
      * (y = 0) under the cursor when it is a wall or a side. Null outside the image.
      */
-    private fun dropPoint(model: PlacedObject, mouseX: Int, mouseY: Int): DoubleArray? {
+    private fun dropPoint(model: Movable, mouseX: Int, mouseY: Int): DoubleArray? {
         val r = panel.imageBounds()
         if (r.width <= 0 || r.height <= 0) return null
         val fx = (mouseX - r.x).toDouble() / r.width
@@ -775,7 +795,7 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
             Point(origin[0].toFloat(), origin[1].toFloat(), origin[2].toFloat()),
             Vector(direction[0].toFloat(), direction[1].toFloat(), direction[2].toFloat())
         )
-        sceneWithoutModels().hit(ray, Interval(0.001f, Float.POSITIVE_INFINITY))?.let { hit ->
+        sceneWithoutModels(except = model).hit(ray, Interval(0.001f, Float.POSITIVE_INFINITY))?.let { hit ->
             bestT = hit.t.toDouble()
             val length = sqrt(hit.normal.x * hit.normal.x + hit.normal.y * hit.normal.y + hit.normal.z * hit.normal.z)
             if (length > 0) normal = doubleArrayOf((hit.normal.x / length).toDouble(), (hit.normal.y / length).toDouble(), (hit.normal.z / length).toDouble())
@@ -884,7 +904,7 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
                 panel.requestFocusInWindow()
                 lastX = e.x
                 lastY = e.y
-                placing = SwingUtilities.isLeftMouseButton(e) && e.isControlDown && selectedModel != null
+                placing = SwingUtilities.isLeftMouseButton(e) && e.isControlDown && selectedMovable != null
                 if (placing) {
                     updateGhost(e.x, e.y)
                     return
@@ -958,13 +978,13 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
     /** Ctrl + drag: where the selected model would land, shown as its box until the button is let go. */
     private fun updateGhost(mouseX: Int, mouseY: Int) {
         placeMarker = java.awt.Point(mouseX, mouseY)
-        ghost = selectedModel?.let { dropPoint(it, mouseX, mouseY) }
+        ghost = selectedMovable?.let { dropPoint(it, mouseX, mouseY) }
         panel.repaint()
     }
 
     /** Ctrl + release: the selected model moves to where its box was shown. */
     private fun dropGhost() {
-        val o = selectedModel
+        val o = selectedMovable
         val target = ghost
         ghost = null
         placeMarker = null
@@ -983,7 +1003,7 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
      * times the step.
      */
     private fun nudge(key: Int, big: Boolean) {
-        val o = selectedModel ?: return
+        val o = selectedMovable ?: return
         val step = defaultObjectHeight / 20 * (if (big) 5 else 1)
         val v = view
         // The camera's right and its forward direction, both flattened onto the floor.
@@ -1047,7 +1067,7 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
         /** The dragged model's box, where it would land, drawn over the image in perspective. */
         private fun drawGhost(g2: Graphics2D) {
             val at = ghost ?: return
-            val model = selectedModel ?: return
+            val model = selectedMovable ?: return
             val b = model.localBounds()
             val s = setup(view, resolution)
             val r = imageBounds()

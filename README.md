@@ -93,7 +93,8 @@ próbki do celu ustawionego w panelu i jest odszumiany przy 16, 64, 256… prób
 - **Obraz** – gotowe rozdzielczości albo własna szerokość i wysokość (*Zastosuj rozdzielczość*),
   **Cel spp** (liczba próbek, przy której render się kończy) z paskiem postępu, odszumianie, zapis.
 - **Światła** – lampa sufitowa i światło przednie do włączania i wyłączania.
-- **Obiekty na scenie** – lista obiektów: kolumna i szklana kula sceny (można je usunąć i przywrócić
+- **Obiekty na scenie** – lista obiektów: kolumna i szklana kula sceny (można je przesuwać i obracać
+  tak jak dodane obiekty – polami X / Y / Z i Obrót, strzałkami, Q / E, Ctrl + przeciąganiem – usunąć i przywrócić
   przyciskiem *Przywróć obiekty sceny*) oraz dodane obiekty. *Dodaj model…* wczytuje STL, OBJ, PLY,
   OFF, glTF/GLB albo 3MF; *Dodaj kulę* i *Dodaj graniastosłup* wstawiają kolejną kulę (szklaną)
   albo graniastosłup w proporcjach kolumny (biały, z własną szerokością i głębokością). Zaznaczony

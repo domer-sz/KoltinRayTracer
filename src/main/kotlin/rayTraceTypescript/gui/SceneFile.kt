@@ -20,6 +20,9 @@ class SavedObject(
     val material: MaterialSpec
 )
 
+/** One of the scene's own objects or lights: whether it is in, and where it stands (null: where the scene put it). */
+class SavedPart(val name: String, val enabled: Boolean, val position: DoubleArray? = null, val rotation: Double = 0.0)
+
 /** Everything the viewer lets one change, as a scene file keeps it. */
 class SavedScene(
     /** The scene the window was opened with (-Drt.scene). */
@@ -33,8 +36,8 @@ class SavedScene(
     val samples: Int,
     val raytrace: Boolean,
     val denoise: Boolean,
-    /** The scene's own objects and lights by name, and whether each is in. */
-    val parts: Map<String, Boolean>,
+    /** The scene's own objects and lights, whether each is in, and any that were moved. */
+    val parts: List<SavedPart>,
     val objects: List<SavedObject>
 )
 
@@ -66,9 +69,13 @@ object SceneFile {
         lines += "image.samples=${s.samples}"
         lines += "mode=${if (s.raytrace) "raytrace" else "quick"}"
         lines += "denoise=${s.denoise}"
-        s.parts.entries.forEachIndexed { i, (name, on) ->
-            lines += "part.$i.name=${escape(name)}"
-            lines += "part.$i.enabled=$on"
+        s.parts.forEachIndexed { i, part ->
+            lines += "part.$i.name=${escape(part.name)}"
+            lines += "part.$i.enabled=${part.enabled}"
+            part.position?.let { p ->
+                lines += "part.$i.position=${p[0]},${p[1]},${p[2]}"
+                lines += "part.$i.rotation=${part.rotation}"
+            }
         }
         s.objects.forEachIndexed { i, o ->
             val p = "object.$i"
@@ -98,10 +105,14 @@ object SceneFile {
         }.also { require(it.size == count) { "$key: oczekiwano $count liczb" } }
 
         val target = numbers("camera.target", 3)
-        val parts = linkedMapOf<String, Boolean>()
+        val parts = mutableListOf<SavedPart>()
         var i = 0
         while (p.getProperty("part.$i.name") != null) {
-            parts[text("part.$i.name")] = text("part.$i.enabled").toBoolean()
+            val position = p.getProperty("part.$i.position")?.let { numbers("part.$i.position", 3).toDoubleArray() }
+            parts += SavedPart(
+                text("part.$i.name"), text("part.$i.enabled").toBoolean(), position,
+                p.getProperty("part.$i.rotation")?.toDoubleOrNull() ?: 0.0
+            )
             i++
         }
         val objects = mutableListOf<SavedObject>()

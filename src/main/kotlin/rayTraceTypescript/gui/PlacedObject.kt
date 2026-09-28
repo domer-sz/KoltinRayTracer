@@ -23,11 +23,84 @@ import rayTraceTypescript.scenes.ScenePart
 sealed interface SceneEntry
 
 /**
- * An object or light the scene came with; the viewer can take it out (switch it off) and put it
- * back, not move it.
+ * An object that can be moved and turned: [x], [y], [z] are the middle of its footprint and its
+ * lowest point, [rotation] its turn about the vertical in degrees.
  */
-class BuiltInObject(val part: ScenePart) : SceneEntry {
+sealed interface Movable : SceneEntry {
+    var x: Double
+    var y: Double
+    var z: Double
+    var rotation: Double
+
+    /** Its box relative to (x, y, z): min x, y, z, max x, y, z. */
+    fun localBounds(): FloatArray
+}
+
+/**
+ * An object or light the scene came with. The viewer can take it out (switch it off), put it
+ * back, and move and turn it: it then stands wrapped in a turn about its footprint's middle and
+ * a move, and so does its stand-in for light sampling, so the renderer still aims at it.
+ */
+class BuiltInObject(val part: ScenePart) : Movable {
     @Volatile var enabled = part.enabled
+
+    /** Where the scene put it: the middle of its footprint, at its lowest point. */
+    private val home: DoubleArray
+    /** Its box around [home], unturned. */
+    private val homeBounds: FloatArray
+
+    init {
+        val b = part.hittable.aabbBoundingBox()
+        home = doubleArrayOf(((b.x.min + b.x.max) / 2).toDouble(), b.y.min.toDouble(), ((b.z.min + b.z.max) / 2).toDouble())
+        homeBounds = floatArrayOf(
+            (b.x.min - home[0]).toFloat(), 0f, (b.z.min - home[2]).toFloat(),
+            (b.x.max - home[0]).toFloat(), b.y.max - b.y.min, (b.z.max - home[2]).toFloat()
+        )
+    }
+
+    @Volatile override var x = home[0]
+    @Volatile override var y = home[1]
+    @Volatile override var z = home[2]
+    @Volatile override var rotation = 0.0
+
+    /** Whether it stands anywhere but where the scene put it. */
+    val moved: Boolean get() = x != home[0] || y != home[1] || z != home[2] || rotation != 0.0
+
+    /** Back where the scene put it. */
+    fun returnHome() {
+        x = home[0]
+        y = home[1]
+        z = home[2]
+        rotation = 0.0
+    }
+
+    /** The part as it now stands. */
+    fun hittable(): Hittable = placed(part.hittable)
+
+    /** Its stand-in for light sampling, moved along with it. */
+    fun lightProxy(): Hittable? = part.lightProxy?.let { placed(it) }
+
+    private fun placed(h: Hittable): Hittable {
+        if (!moved) return h
+        val centred = Translate(h, Vector(-home[0].toFloat(), -home[1].toFloat(), -home[2].toFloat()))
+        return Translate(RotateY(centred, rotation.toFloat()), Vector(x.toFloat(), y.toFloat(), z.toFloat()))
+    }
+
+    override fun localBounds(): FloatArray {
+        val b = homeBounds
+        val a = Math.toRadians(rotation)
+        val c = kotlin.math.cos(a)
+        val s = kotlin.math.sin(a)
+        var minX = Double.POSITIVE_INFINITY; var maxX = Double.NEGATIVE_INFINITY
+        var minZ = Double.POSITIVE_INFINITY; var maxZ = Double.NEGATIVE_INFINITY
+        for (px in floatArrayOf(b[0], b[3])) for (pz in floatArrayOf(b[2], b[5])) {
+            val tx = c * px + s * pz
+            val tz = -s * px + c * pz
+            minX = minOf(minX, tx); maxX = maxOf(maxX, tx)
+            minZ = minOf(minZ, tz); maxZ = maxOf(maxZ, tz)
+        }
+        return floatArrayOf(minX.toFloat(), b[1], minZ.toFloat(), maxX.toFloat(), b[4], maxZ.toFloat())
+    }
 
     override fun toString() = part.name
 }
@@ -114,11 +187,11 @@ sealed interface Shape {
  * also has its own [width] and [depth]; a model is scaled so its height is [height]. A model
  * remembers its [source] file, which a saved scene points to.
  */
-class PlacedObject(val name: String, val shape: Shape, val source: java.io.File? = null) : SceneEntry {
-    @Volatile var x = 0.0
-    @Volatile var y = 0.0
-    @Volatile var z = 0.0
-    @Volatile var rotation = 0.0
+class PlacedObject(val name: String, val shape: Shape, val source: java.io.File? = null) : Movable {
+    @Volatile override var x = 0.0
+    @Volatile override var y = 0.0
+    @Volatile override var z = 0.0
+    @Volatile override var rotation = 0.0
     @Volatile var height = 1.0
     @Volatile var width = 0.5
     @Volatile var depth = 0.5
@@ -220,7 +293,7 @@ class PlacedObject(val name: String, val shape: Shape, val source: java.io.File?
      * it is dragged and for standing other objects on it. Worked out again only when the object
      * is turned, resized or stood up differently.
      */
-    fun localBounds(): FloatArray {
+    override fun localBounds(): FloatArray {
         val key = listOf(zUp, rotation, height, width, depth)
         if (key != boundsFor) {
             bounds = when (shape) {
