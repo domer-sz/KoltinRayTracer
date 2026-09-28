@@ -218,6 +218,9 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
                     z = defaultObjectPosition[2]
                     height = defaultObjectHeight
                 }
+                status = "Przygotowuję ${file.name}…"
+                panel.repaint()
+                placed.prepare()
                 objects += placed
                 selected = placed
                 sceneChanged()
@@ -398,6 +401,7 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
                         depth = o.depth
                         zUp = o.zUp
                         material = o.material
+                        prepare()
                     }
                 }
 
@@ -515,6 +519,9 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
         var finalDenoiseDone = false
         var rateSamples = 0L
         var rateStart = System.nanoTime()
+        var kernelNs = 0L
+        var denoiseNs = 0L
+        var finishedSeconds = 0.0
 
         while (running) {
             val size = resolution
@@ -600,6 +607,8 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
                 finalDenoiseDone = false
                 rateSamples = 0
                 rateStart = System.nanoTime()
+                kernelNs = 0L
+                denoiseNs = 0L
             }
             val s = setup!!
             val target = targetSamples
@@ -609,10 +618,21 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
                 val count = minOf(slice, target - samples)
                 val launchStart = System.nanoTime()
                 session.launch(GpuSession.MODE_IMAGE, s, samples, count, 1.0f)
-                val launchMs = maxOf((System.nanoTime() - launchStart) / 1_000_000.0, 1.0)
+                val launchNs = System.nanoTime() - launchStart
+                val launchMs = maxOf(launchNs / 1_000_000.0, 1.0)
                 samples += count
                 rateSamples += count.toLong() * s.totalPixels
+                kernelNs += launchNs
                 slice = (count * LAUNCH_MS / launchMs).toInt().coerceIn(1, count * 2)
+                if (samples >= target) {
+                    val wall = (System.nanoTime() - rateStart) / 1e9
+                    finishedSeconds = wall
+                    System.err.printf(
+                        "[viewer] %d spp at %dx%d: %.1f s, of it kernel %.1f s (%.1f M samples/s), denoising %.1f s%n",
+                        samples, s.imageWidth, s.imageHeight, wall, kernelNs / 1e9,
+                        rateSamples / (kernelNs / 1e9) / 1e6, denoiseNs / 1e9
+                    )
+                }
             }
             val done = samples >= target
 
@@ -620,6 +640,7 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
             val denoiseNow = denoiser != null && denoiseOn &&
                 ((samples >= nextDenoise && !done) || (done && !finalDenoiseDone))
             if (denoiseNow) {
+                val denoiseStart = System.nanoTime()
                 session.read(GpuSession.IMAGE, pixels)
                 val guidePair = guides ?: renderGuides(session, s).also { guides = it }
                 val average = FloatArray(pixels.size) { pixels[it] / samples }
@@ -627,11 +648,13 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
                 while (nextDenoise <= samples) nextDenoise *= 4
                 if (done) finalDenoiseDone = true
                 lastShown = 0
+                denoiseNs += System.nanoTime() - denoiseStart
             }
             if (now - lastShown > DISPLAY_INTERVAL_NS || saveRequested) {
                 session.read(GpuSession.IMAGE, pixels)
-                val seconds = (now - rateStart) / 1e9
-                val rate = if (seconds > 0) rateSamples / seconds / 1e6 else 0.0
+                // The GPU's own speed: samples over the time spent in their launches. Wall time
+                // would count the denoiser's pauses too, which early on outlast the sampling.
+                val rate = if (kernelNs > 0) rateSamples / (kernelNs / 1e9) / 1e6 else 0.0
                 val cleanShown = denoiseOn && denoised != null
                 val image = if (cleanShown) toImage(denoised!!, s.imageWidth, s.imageHeight, 1.0f)
                 else toImage(pixels, s.imageWidth, s.imageHeight, 1.0f / samples)
@@ -642,7 +665,7 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
                     cleanShown -> "odszumione"
                     else -> "odszumię przy ${minOf(nextDenoise, target)} spp"
                 }
-                val speed = if (done) "" else " · %.1f M próbek/s".format(rate)
+                val speed = if (done) " · %.1f s".format(finishedSeconds) else " · %.1f M próbek/s".format(rate)
                 show(image, "${s.imageWidth}×${s.imageHeight} · $samples / $target spp$speed · $denoiseNote")
                 SwingUtilities.invokeLater { if (::controls.isInitialized) controls.showProgress(samples, target) }
                 lastShown = now

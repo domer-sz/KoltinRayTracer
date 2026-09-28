@@ -158,6 +158,14 @@ class PlacedObject(val name: String, val shape: Shape, val source: java.io.File?
     @Volatile private var blockZUp: Boolean? = null
     @Volatile private var block: MeshBlock? = null
 
+    /**
+     * Builds a model's GPU tree now, on the calling thread - the loader's - so the render thread
+     * does not stall on it when the object first joins the scene.
+     */
+    fun prepare() {
+        if (shape is Shape.Model) block(shape.mesh)
+    }
+
     /** The model stood up, with its own GPU tree; built again only when [zUp] changes. */
     private fun block(mesh: Mesh): MeshBlock {
         block?.let { if (blockZUp == zUp) return it }
