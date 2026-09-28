@@ -23,6 +23,9 @@ class SavedObject(
 /** One of the scene's own objects or lights: whether it is in, and where it stands (null: where the scene put it). */
 class SavedPart(val name: String, val enabled: Boolean, val position: DoubleArray? = null, val rotation: Double = 0.0)
 
+/** A wall whose material was changed. */
+class SavedWall(val name: String, val material: MaterialSpec)
+
 /** Everything the viewer lets one change, as a scene file keeps it. */
 class SavedScene(
     /** The scene the window was opened with (-Drt.scene). */
@@ -40,7 +43,9 @@ class SavedScene(
     val parts: List<SavedPart>,
     val objects: List<SavedObject>,
     /** How many bounces a path may take; 0 keeps the scene's own. */
-    val depth: Int = 0
+    val depth: Int = 0,
+    /** Walls made of something other than the scene's own material. */
+    val walls: List<SavedWall> = emptyList()
 )
 
 /**
@@ -80,6 +85,12 @@ object SceneFile {
                 lines += "part.$i.rotation=${part.rotation}"
             }
         }
+        s.walls.forEachIndexed { i, w ->
+            lines += "wall.$i.name=${escape(w.name)}"
+            lines += "wall.$i.material=${w.material.kind.name}"
+            lines += "wall.$i.colour=${w.material.red},${w.material.green},${w.material.blue}"
+            lines += "wall.$i.parameter=${w.material.parameter}"
+        }
         s.objects.forEachIndexed { i, o ->
             val p = "object.$i"
             lines += "$p.name=${escape(o.name)}"
@@ -118,6 +129,18 @@ object SceneFile {
             )
             i++
         }
+        fun material(prefix: String): MaterialSpec {
+            val colour = numbers("$prefix.colour", 3)
+            val kind = MaterialKind.values().firstOrNull { it.name == text("$prefix.material") }
+                ?: throw IllegalArgumentException("$prefix.material: nieznany materiał ${text("$prefix.material")}")
+            return MaterialSpec(kind, colour[0].toFloat(), colour[1].toFloat(), colour[2].toFloat(), number("$prefix.parameter"))
+        }
+        val walls = mutableListOf<SavedWall>()
+        i = 0
+        while (p.getProperty("wall.$i.name") != null) {
+            walls += SavedWall(text("wall.$i.name"), material("wall.$i"))
+            i++
+        }
         val objects = mutableListOf<SavedObject>()
         i = 0
         while (p.getProperty("object.$i.shape") != null) {
@@ -154,7 +177,8 @@ object SceneFile {
             denoise = p.getProperty("denoise")?.toBoolean() ?: true,
             parts = parts,
             objects = objects,
-            depth = p.getProperty("image.depth")?.toIntOrNull() ?: 0
+            depth = p.getProperty("image.depth")?.toIntOrNull() ?: 0,
+            walls = walls
         )
     }
 

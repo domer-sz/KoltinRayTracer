@@ -13,6 +13,7 @@ import rayTraceTypescript.Point
 import rayTraceTypescript.objects.Hittable
 import rayTraceTypescript.objects.HittableList
 import rayTraceTypescript.objects.Mesh
+import rayTraceTypescript.objects.Quad
 import rayTraceTypescript.objects.RotateY
 import rayTraceTypescript.objects.Sphere
 import rayTraceTypescript.objects.Translate
@@ -21,6 +22,42 @@ import rayTraceTypescript.scenes.ScenePart
 
 /** An object listed in the viewer: part of the scene itself, or a model added there. */
 sealed interface SceneEntry
+
+/** Something whose material the viewer lets one change: an added object or a wall. */
+sealed interface HasMaterial : SceneEntry {
+    var material: MaterialSpec
+}
+
+/**
+ * One of the room's walls (a [ScenePart] marked as a surface). It stays where it is; its
+ * material can be changed, and a changed wall is rebuilt as the same quad made of that.
+ */
+class WallObject(val part: ScenePart) : HasMaterial {
+    private val quad = part.hittable as? Quad
+    /** What the scene made it of, when that is a plain colour the editor can show. */
+    val original: MaterialSpec = originalSpec()
+    @Volatile override var material: MaterialSpec = original
+
+    val changed: Boolean get() = material != original
+
+    /** Whether the editor can remake it: a quad, which every wall of the Cornell box is. */
+    val editable: Boolean get() = quad != null
+
+    fun hittable(): Hittable {
+        val q = quad
+        if (!changed || q == null) return part.hittable
+        return Quad(q.q, q.u, q.v, material.material())
+    }
+
+    private fun originalSpec(): MaterialSpec {
+        val m = quad?.material
+        val colour = ((m as? Lambertian)?.texture as? rayTraceTypescript.textures.SolidColorTexture)?.albedo
+        return if (colour != null) MaterialSpec(MaterialKind.MATTE, colour.r, colour.g, colour.b)
+        else MaterialPreset.WHITE.spec
+    }
+
+    override fun toString() = part.name
+}
 
 /**
  * An object that can be moved and turned: [x], [y], [z] are the middle of its footprint and its
@@ -187,7 +224,7 @@ sealed interface Shape {
  * also has its own [width] and [depth]; a model is scaled so its height is [height]. A model
  * remembers its [source] file, which a saved scene points to.
  */
-class PlacedObject(val name: String, val shape: Shape, val source: java.io.File? = null) : Movable {
+class PlacedObject(val name: String, val shape: Shape, val source: java.io.File? = null) : Movable, HasMaterial {
     @Volatile override var x = 0.0
     @Volatile override var y = 0.0
     @Volatile override var z = 0.0
@@ -196,7 +233,7 @@ class PlacedObject(val name: String, val shape: Shape, val source: java.io.File?
     @Volatile var width = 0.5
     @Volatile var depth = 0.5
     @Volatile var zUp = false
-    @Volatile var material = MaterialPreset.GREY.spec
+    @Volatile override var material = MaterialPreset.GREY.spec
 
     val isModel: Boolean get() = shape is Shape.Model
 

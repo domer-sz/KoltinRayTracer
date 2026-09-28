@@ -105,6 +105,9 @@ próbki do celu ustawionego w panelu i jest odszumiany przy 16, 64, 256… prób
   i niebieski mat, szkło, diament, lustro, złoto, miedź, stal szczotkowana, świecący biały) albo własny:
   rodzaj (matowy, metal, szkło, świecący), kolor z okna wyboru i parametr zależny od rodzaju
   (chropowatość metalu, współczynnik załamania szkła, moc światła).
+  Na końcu listy są ściany pokoju (lewa, prawa, tylna, podłoga, sufit): po zaznaczeniu można
+  zmienić ich materiał tym samym edytorem, np. zrobić lustrzaną ścianę; *Materiał jak w scenie*
+  przywraca oryginał.
   *Oś Z w górę* włącza się sama dla plików do druku 3D (STL, 3MF).
 
 ## Zapis obrazu i sceny

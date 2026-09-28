@@ -33,7 +33,8 @@ object HelpDialog {
             "Panel: X, Y, Z, Obrót, Wysokość" to "Ustaw zaznaczony model",
             "Panel: Materiał - Gotowy" to "Szary, biały, czerwony, niebieski mat, szkło, diament, lustro, złoto, miedź, stal, świecący",
             "Panel: Materiał - Rodzaj, Kolor, parametr" to "Matowy, metal (chropowatość), szkło (wsp. załamania) lub świecący (moc)",
-            "Panel: Przywróć obiekty sceny" to "Wróć usunięte i przesunięte obiekty sceny na ich miejsca"
+            "Panel: Przywróć obiekty sceny" to "Wróć usunięte i przesunięte obiekty sceny na ich miejsca",
+            "Lista: Ściana lewa / prawa / tylna, Podłoga, Sufit" to "Zaznacz ścianę, żeby zmienić jej materiał (te same zestawy i kolory co dla obiektów); Materiał jak w scenie - powrót"
         ),
         "Światła" to listOf(
             "Panel: Lampa sufitowa" to "Włącz / wyłącz lampę pod sufitem",

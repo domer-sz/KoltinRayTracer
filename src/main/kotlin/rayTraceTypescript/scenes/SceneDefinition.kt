@@ -19,12 +19,14 @@ class SceneDefinition(
  * One removable object or switchable light of a scene. [lightProxy] is its stand-in in the
  * camera's light list, when the renderer aims samples at it, so taking it out stops that too.
  * A part that does not start [enabled] is in neither the world nor the light list until a
- * viewer switches it on.
+ * viewer switches it on. A [isSurface] part is one of the room's walls: a viewer keeps it in
+ * place and lets its material be changed instead.
  */
 class ScenePart(
     val name: String,
     val hittable: Hittable,
     val lightProxy: Hittable? = null,
     val isLight: Boolean = false,
-    val enabled: Boolean = true
+    val enabled: Boolean = true,
+    val isSurface: Boolean = false
 )

@@ -125,7 +125,9 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
     private val sceneVersion = AtomicInteger(0)
     @Volatile private var lastSceneEdit = 0L
     /** The scene's own switchable lights and removable objects. */
-    val builtIns: List<BuiltInObject> = scene.parts.map { BuiltInObject(it) }
+    val builtIns: List<BuiltInObject> = scene.parts.filter { !it.isSurface }.map { BuiltInObject(it) }
+    /** The room's walls, whose materials can be changed. */
+    val walls: List<WallObject> = scene.parts.filter { it.isSurface }.map { WallObject(it) }.filter { it.editable }
     val lights: List<BuiltInObject> get() = builtIns.filter { it.part.isLight }
     @Volatile var selected: SceneEntry? = null
     /** The selection when it is an added object - the only kind with a size and a material. */
@@ -133,8 +135,11 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
     /** The selection when it can be moved: an added object, or one of the scene's own. */
     val selectedMovable: Movable? get() = selected as? Movable
 
-    /** What the object list shows: the scene's objects still in it, then the added models. */
-    fun entries(): List<SceneEntry> = builtIns.filter { !it.part.isLight && it.enabled } + objects
+    /** What the object list shows: the scene's objects still in it, the added models, then the walls. */
+    fun entries(): List<SceneEntry> = builtIns.filter { !it.part.isLight && it.enabled } + objects + walls
+
+    /** The selection when its material can be changed: an added object or a wall. */
+    val selectedMaterial: HasMaterial? get() = selected as? HasMaterial
 
     @Volatile private var shown: BufferedImage? = null
     @Volatile private var status = "Przygotowuję scenę…"
@@ -262,6 +267,8 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
         when (entry) {
             is PlacedObject -> objects -= entry
             is BuiltInObject -> entry.enabled = false
+            // The room keeps its walls.
+            is WallObject -> return
         }
         if (selected === entry) selected = null
         sceneChanged()
@@ -352,7 +359,8 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
                 }
                 SavedObject(o.name, shape, o.source, o.x, o.y, o.z, o.rotation, o.height, o.width, o.depth, o.zUp, o.material)
             },
-            depth = maxDepth
+            depth = maxDepth,
+            walls = walls.filter { it.changed }.map { SavedWall(it.part.name, it.material) }
         )
         SceneFile.write(file, saved)
         status = "Zapisano scenę ${file.name}"
@@ -431,6 +439,7 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
                 selected = null
                 targetSamples = s.samples.coerceAtLeast(1)
                 if (s.depth > 0) maxDepth = s.depth
+                walls.forEach { w -> w.material = s.walls.firstOrNull { it.name == w.part.name }?.material ?: w.original }
                 raytrace = s.raytrace
                 denoiseOn = s.denoise
                 view = View(doubleArrayOf(s.camera[0], s.camera[1], s.camera[2]), s.camera[3], s.camera[4], s.camera[5], s.camera[6])
@@ -465,11 +474,12 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
      */
     private fun sceneWithoutModels(except: SceneEntry? = null): Hittable {
         val world = scene.world
-        val all = builtIns.map { it.part.hittable }
+        val all = builtIns.map { it.part.hittable } + walls.map { it.part.hittable }
         val room = if (world is HittableList && all.isNotEmpty()) {
             HittableList(world.objects.filter { o -> all.none { it === o } }.toMutableList())
         } else world
         val parts = mutableListOf<Hittable>(room)
+        walls.forEach { parts += it.hittable() }
         builtIns.filter { it.enabled && it !== except }.forEach { parts += it.hittable() }
         return HittableList(parts)
     }

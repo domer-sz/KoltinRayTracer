@@ -99,7 +99,10 @@ class ControlPanel(private val viewer: Viewer, private val frame: JFrame) : JPan
     /** Fields for anything that can be moved: an added object or one of the scene's own. */
     private val placeFields: List<Component> = listOf(centre, posX, posY, posZ, turn)
     /** Fields only an added object has: its size and what it is made of. */
-    private val modelFields: List<Component> = listOf(size, materialPreset, materialKind, colour, parameter, zUp)
+    private val modelFields: List<Component> = listOf(size, zUp)
+    /** Fields for anything with a material: an added object or a wall. */
+    private val materialFields: List<Component> = listOf(materialPreset, materialKind, colour, parameter)
+    private val wallReset = JButton("Materiał jak w scenie").apply { isVisible = false }
 
     private var lastFolder: File? = File("../stls").takeIf { it.isDirectory } ?: File(".")
 
@@ -159,6 +162,7 @@ class ControlPanel(private val viewer: Viewer, private val frame: JFrame) : JPan
         field("Rodzaj", materialKind)
         field("Kolor", colour)
         field(parameterLabel, parameter)
+        full(wallReset)
         full(zUp)
         full(info)
         if (viewer.builtIns.any { !it.part.isLight }) full(restore)
@@ -202,26 +206,31 @@ class ControlPanel(private val viewer: Viewer, private val frame: JFrame) : JPan
         materialPreset.addActionListener {
             if (syncing) return@addActionListener
             val chosen = materialPreset.selectedItem as? MaterialPreset ?: return@addActionListener
-            edit { o -> o.material = chosen.spec }
+            editMaterial { o -> o.material = chosen.spec }
             refreshSelection()
         }
         materialKind.addActionListener {
             if (syncing) return@addActionListener
             val kind = materialKind.selectedItem as MaterialKind
-            edit { o ->
+            editMaterial { o ->
                 // A new kind starts from its usual value: slightly rough metal, window glass, a bright light.
                 if (o.material.kind != kind) o.material = o.material.copy(kind = kind, parameter = defaultParameter(kind))
             }
             refreshSelection()
         }
         colour.addActionListener {
-            val o = viewer.selectedModel ?: return@addActionListener
-            val picked = JColorChooser.showDialog(frame, "Kolor materiału - ${o.name}", o.material.screenColor())
+            val o = viewer.selectedMaterial ?: return@addActionListener
+            val picked = JColorChooser.showDialog(frame, "Kolor materiału - $o", o.material.screenColor())
                 ?: return@addActionListener
-            edit { it.material = it.material.withScreenColor(picked) }
+            editMaterial { it.material = it.material.withScreenColor(picked) }
             refreshSelection()
         }
-        parameter.addChangeListener { edit { o -> o.material = o.material.copy(parameter = parameter.value as Double) } }
+        parameter.addChangeListener { editMaterial { o -> o.material = o.material.copy(parameter = parameter.value as Double) } }
+        wallReset.addActionListener {
+            val wall = viewer.selected as? WallObject ?: return@addActionListener
+            editMaterial { wall.material = wall.original }
+            refreshSelection()
+        }
         zUp.addActionListener { edit { o -> o.zUp = zUp.isSelected } }
         blockWidth.addChangeListener { edit { o -> o.width = blockWidth.value as Double } }
         blockDepth.addChangeListener { edit { o -> o.depth = blockDepth.value as Double } }
@@ -238,6 +247,14 @@ class ControlPanel(private val viewer: Viewer, private val frame: JFrame) : JPan
         change(o)
         viewer.sceneChanged()
         restore.isEnabled = viewer.builtIns.any { !it.part.isLight && (!it.enabled || it.moved) }
+    }
+
+    /** Changes the material of the selection - an added object or a wall - unless the panel is filling its fields. */
+    private fun editMaterial(change: (HasMaterial) -> Unit) {
+        if (syncing) return
+        val o = viewer.selectedMaterial ?: return
+        change(o)
+        viewer.sceneChanged()
     }
 
     /** Applies a field change to the selected added object, unless the panel is filling its fields. */
@@ -347,10 +364,16 @@ class ControlPanel(private val viewer: Viewer, private val frame: JFrame) : JPan
     fun refreshSelection() {
         val o = viewer.selectedModel
         val m = viewer.selectedMovable
+        val mat = viewer.selectedMaterial
+        val wall = viewer.selected as? WallObject
         syncing = true
-        remove.isEnabled = viewer.selected != null
+        remove.isEnabled = viewer.selected != null && wall == null
         placeFields.forEach { it.isEnabled = m != null }
         modelFields.forEach { it.isEnabled = o != null }
+        materialFields.forEach { it.isEnabled = mat != null }
+        wallReset.isVisible = wall != null
+        wallReset.isEnabled = wall?.changed == true
+        if (mat != null) showMaterial(mat.material)
         // Only a loaded model can be stood up from z; only a block has its own width and depth.
         zUp.isEnabled = o?.isModel == true
         blockWidth.isEnabled = o?.shape == Shape.Block
@@ -364,9 +387,10 @@ class ControlPanel(private val viewer: Viewer, private val frame: JFrame) : JPan
         }
         if (viewer.selected is BuiltInObject) {
             info.text = "Obiekt sceny - można go przesuwać, obracać i usunąć"
+        } else if (wall != null) {
+            info.text = "Ściana - można zmienić jej materiał"
         } else if (o != null) {
             size.value = o.height
-            showMaterial(o.material)
             zUp.isSelected = o.zUp
             blockWidth.value = o.width
             blockDepth.value = o.depth

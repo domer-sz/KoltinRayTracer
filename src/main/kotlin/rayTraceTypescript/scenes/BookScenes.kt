@@ -179,19 +179,25 @@ object BookScenes {
         val light = DiffuseLight(Color(15f, 15f, 15f))
 
         val lamp = Quad(Point(343f, 554f, 332f), Vector(-130f, 0f, 0f), Vector(0f, 0f, -105f), light)
-        val walls = mutableListOf<Hittable>(
-            Quad(Point(555f, 0f, 0f), Vector(0f, 555f, 0f), Vector(0f, 0f, 555f), green),
-            Quad(Point(0f, 0f, 0f), Vector(0f, 555f, 0f), Vector(0f, 0f, 555f), red),
-            lamp,
-            Quad(Point(0f, 0f, 0f), Vector(555f, 0f, 0f), Vector(0f, 0f, 555f), white),
-            Quad(Point(555f, 555f, 555f), Vector(-555f, 0f, 0f), Vector(0f, 0f, -555f), white),
-            Quad(Point(0f, 0f, 555f), Vector(555f, 0f, 0f), Vector(0f, 555f, 0f), white)
-        )
+        // Named as the camera sees them: it looks down +z, so x = 555 is on the left.
+        val left = Quad(Point(555f, 0f, 0f), Vector(0f, 555f, 0f), Vector(0f, 0f, 555f), green)
+        val right = Quad(Point(0f, 0f, 0f), Vector(0f, 555f, 0f), Vector(0f, 0f, 555f), red)
+        val floor = Quad(Point(0f, 0f, 0f), Vector(555f, 0f, 0f), Vector(0f, 0f, 555f), white)
+        val ceiling = Quad(Point(555f, 555f, 555f), Vector(-555f, 0f, 0f), Vector(0f, 0f, -555f), white)
+        val back = Quad(Point(0f, 0f, 555f), Vector(555f, 0f, 0f), Vector(0f, 555f, 0f), white)
+        val walls = mutableListOf<Hittable>(left, right, lamp, floor, ceiling, back)
         walls.addAll(contents)
 
         return SceneDefinition(
             name = "cornell-box",
-            parts = listOf(ScenePart("Lampa sufitowa", lamp, isLight = true)),
+            parts = listOf(
+                ScenePart("Lampa sufitowa", lamp, isLight = true),
+                ScenePart("Ściana lewa", left, isSurface = true),
+                ScenePart("Ściana prawa", right, isSurface = true),
+                ScenePart("Ściana tylna", back, isSurface = true),
+                ScenePart("Podłoga", floor, isSurface = true),
+                ScenePart("Sufit", ceiling, isSurface = true)
+            ),
             world = HittableList(walls),
             camera = Camera().apply {
                 aspectRatio = 1.0f
@@ -383,7 +389,7 @@ object BookScenes {
                 ScenePart("Światło przednie", fill, fill, isLight = true, enabled = fillStrength > 0.0f),
                 ScenePart("Wysoki blok", tall),
                 ScenePart("Szklana kula", glassSphere, sphereProxy)
-            )
+            ) + scene.parts.filter { it.isSurface }
         )
     }
 

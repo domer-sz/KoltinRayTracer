@@ -10,6 +10,7 @@ import rayTraceTypescript.gui.MaterialSpec
 import rayTraceTypescript.gui.SavedObject
 import rayTraceTypescript.gui.SavedPart
 import rayTraceTypescript.gui.SavedScene
+import rayTraceTypescript.gui.SavedWall
 import rayTraceTypescript.gui.SceneFile
 import java.io.File
 
@@ -37,7 +38,8 @@ class SceneFileTest {
                 SavedObject("Kula 1", "ball", null, 100.0, 20.0, 50.0, 0.0, 80.0, 40.0, 40.0, false,
                     MaterialSpec(MaterialKind.GLASS, 1f, 1f, 1f, 1.5))
             ),
-            depth = 12
+            depth = 12,
+            walls = listOf(SavedWall("Ściana lewa", MaterialSpec(MaterialKind.METAL, 0.9f, 0.9f, 0.9f, 0.0)))
         )
         val file = File(dir, "scena.rtscene")
         SceneFile.write(file, saved)
@@ -55,6 +57,8 @@ class SceneFileTest {
         assertEquals(null, read.parts[0].position)
         assertArrayEquals(doubleArrayOf(120.0, 0.0, 250.5), read.parts[2].position, 1e-9)
         assertEquals(-30.0, read.parts[2].rotation)
+        assertEquals(listOf("Ściana lewa"), read.walls.map { it.name })
+        assertEquals(saved.walls[0].material, read.walls[0].material)
         assertEquals(2, read.objects.size)
         val ork = read.objects[0]
         assertEquals("Ork\\z mieczem", ork.name)
