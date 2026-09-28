@@ -75,6 +75,55 @@ class MeshLoaderTest {
     }
 
     @Test
+    fun `obj reads the colours its material library gives the faces`() {
+        val obj = write(
+            "painted.obj",
+            """
+            mtllib painted.mtl
+            v 0 0 0
+            v 1 0 0
+            v 1 1 0
+            v 0 1 0
+            f 1 2 3
+            usemtl blade
+            f 1 3 4
+            usemtl robe
+            f 2 3 4
+            usemtl unknown
+            f 1 2 4
+            """.trimIndent()
+        )
+        Files.writeString(
+            obj.resolveSibling("painted.mtl"),
+            """
+            newmtl robe
+            Kd 0.1 0.2 0.6
+            newmtl blade
+            Kd 0.8 0.8 0.8
+            Pm 1.0
+            Pr 0.1
+            """.trimIndent()
+        )
+        val mesh = MeshLoader.load(obj)
+        assertTrue(mesh.hasColours)
+        // In the order the faces first use them; faces before any material, or naming one the
+        // library lacks, take the first entry.
+        assertEquals(listOf("blade", "robe"), mesh.palette.map { it.name })
+        assertEquals(listOf(0, 0, 1, 0), mesh.faceMaterials!!.toList())
+        assertTrue(mesh.palette[0].material() is rayTraceTypescript.materials.Metal)
+        assertTrue(mesh.palette[1].material() is rayTraceTypescript.materials.Lambertian)
+        assertEquals(0.6f, mesh.palette[1].colour.b, 1e-6f)
+        // Moving the mesh keeps its colours.
+        assertEquals(mesh.faceMaterials!!.toList(), mesh.zUpToYUp().rotatedY(30f).standingOnFloor().faceMaterials!!.toList())
+    }
+
+    @Test
+    fun `an obj without a material library has no colours`() {
+        val obj = write("plain.obj", "v 0 0 0\nv 1 0 0\nv 0 1 0\nusemtl robe\nf 1 2 3\n")
+        assertTrue(!MeshLoader.load(obj).hasColours)
+    }
+
+    @Test
     fun `gltf bakes node transforms into the geometry`() {
         val moved = MeshLoader.load(glb(translation = floatArrayOf(10f, 0f, 0f)))
         assertEquals(10f, moved.bounds().x.min, 1e-4f, "the node translation moved the mesh")

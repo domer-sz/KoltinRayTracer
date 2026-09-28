@@ -23,7 +23,7 @@ object MeshLoader {
         val bytes = Files.readAllBytes(path)
         return when (extension) {
             "stl" -> StlFormat.parse(bytes)
-            "obj" -> ObjFormat.parse(bytes)
+            "obj" -> ObjFormat.parse(bytes, path.toAbsolutePath().parent)
             "ply" -> PlyFormat.parse(bytes)
             "off" -> OffFormat.parse(bytes)
             "gltf", "glb" -> GltfFormat.parse(bytes, path.toAbsolutePath().parent)

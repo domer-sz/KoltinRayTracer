@@ -109,6 +109,9 @@ próbki do celu ustawionego w panelu i jest odszumiany przy 16, 64, 256… prób
   zmienić ich materiał tym samym edytorem, np. zrobić lustrzaną ścianę; *Materiał jak w scenie*
   przywraca oryginał.
   *Oś Z w górę* włącza się sama dla plików do druku 3D (STL, 3MF).
+  Model OBJ z plikiem materiałów (`.mtl`) wczytuje się w swoich kolorach – *Gotowy: Kolory z pliku*;
+  wybranie innego materiału zastępuje je, a *Kolory z pliku* do nich wraca. Czytane są `Kd` (kolor),
+  `Pm`/`Pr` (metal, chropowatość), `Ke` (świecenie) i `d`/`Ni` (szkło). Przykład: `models/orc-painted.obj`.
 
 ## Zapis obrazu i sceny
 

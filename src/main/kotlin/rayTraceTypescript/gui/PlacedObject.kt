@@ -237,6 +237,12 @@ class PlacedObject(val name: String, val shape: Shape, val source: java.io.File?
 
     val isModel: Boolean get() = shape is Shape.Model
 
+    /** Whether the model's file coloured its faces (an OBJ with a .mtl). */
+    val hasFileColours: Boolean get() = (shape as? Shape.Model)?.mesh?.hasColours == true
+
+    /** Made of the file's own materials rather than [material]; on for a coloured file from the start. */
+    @Volatile var fileColours: Boolean = hasFileColours
+
     /** A line about what the object is, for the panel. */
     val description: String
         get() = when (shape) {
@@ -314,7 +320,8 @@ class PlacedObject(val name: String, val shape: Shape, val source: java.io.File?
             y.toFloat() - minY * scale,
             z.toFloat() - (minZ + maxZ) / 2 * scale
         )
-        return PlacedMesh(b, scale, rotation.toFloat(), offset, material)
+        val palette = if (fileColours && hasFileColours) b.mesh.palette.map { it.material() } else null
+        return PlacedMesh(b, scale, rotation.toFloat(), offset, material, palette)
     }
 
     /** The mesh stood up, turned and scaled, its footprint centred on the origin at y = 0. */

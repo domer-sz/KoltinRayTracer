@@ -1,6 +1,7 @@
 package rayTraceTypescript.objects.formats
 
 import rayTraceTypescript.objects.Mesh
+import rayTraceTypescript.objects.MeshMaterial
 
 /** Growable float storage; mesh files rarely say up front how much data they hold. */
 internal class FloatList(initialCapacity: Int = 1024) {
@@ -27,17 +28,27 @@ internal class FloatList(initialCapacity: Int = 1024) {
 /** Collects triangles for the format parsers and turns them into a [Mesh]. */
 internal class MeshBuilder(expectedTriangles: Int = 128) {
     private val data = FloatList(expectedTriangles * Mesh.VERTEX_FLOATS)
+    /** Each triangle's material so far, when the file names any. */
+    private var faceMaterials = IntArray(0)
 
     val triangleCount: Int get() = data.size / Mesh.VERTEX_FLOATS
+
+    /** The palette entry the next triangles are made of; -1 while the file has named none. */
+    var material: Int = -1
 
     fun triangle(
         ax: Float, ay: Float, az: Float,
         bx: Float, by: Float, bz: Float,
         cx: Float, cy: Float, cz: Float
     ) {
+        val index = triangleCount
         data.add(ax, ay, az)
         data.add(bx, by, bz)
         data.add(cx, cy, cz)
+        if (material >= 0 || faceMaterials.isNotEmpty()) {
+            if (faceMaterials.size <= index) faceMaterials = faceMaterials.copyOf(maxOf(index + 1, faceMaterials.size * 2, 1024))
+            faceMaterials[index] = material
+        }
     }
 
     /**
@@ -60,5 +71,16 @@ internal class MeshBuilder(expectedTriangles: Int = 128) {
         }
     }
 
-    fun build(): Mesh = Mesh(data.toFloatArray())
+    /**
+     * The mesh, with its faces' materials when [palette] names some: faces before the first
+     * material, and faces naming one the palette lacks, get entry 0.
+     */
+    fun build(palette: List<MeshMaterial> = emptyList()): Mesh {
+        if (palette.isEmpty() || faceMaterials.isEmpty()) return Mesh(data.toFloatArray())
+        val faces = IntArray(triangleCount) { i ->
+            val m = if (i < faceMaterials.size) faceMaterials[i] else 0
+            if (m in palette.indices) m else 0
+        }
+        return Mesh(data.toFloatArray(), faces, palette)
+    }
 }

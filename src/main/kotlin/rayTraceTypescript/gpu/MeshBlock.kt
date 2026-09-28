@@ -29,6 +29,8 @@ class MeshBlock(val mesh: Mesh) {
     /** (kind, triangle) pairs, triangles counted from 0 in [triangles]. */
     internal val refs: IntArray
     internal val maxDepth: Int
+    /** Each triangle's entry in the mesh's palette, in leaf order; null when the file gave none. */
+    internal val faceMaterials: IntArray?
     val triangleCount: Int = mesh.triangleCount
     val bounds: Aabb = mesh.bounds()
 
@@ -58,13 +60,17 @@ class MeshBlock(val mesh: Mesh) {
         // Triangles in the order the leaves read them, as SceneFlattener lays a scene out.
         val ordered = FloatArray(source.size)
         val treeRefs = builder.refs.toArray()
+        val sourceMaterials = mesh.faceMaterials?.takeIf { mesh.hasColours }
+        val orderedMaterials = sourceMaterials?.let { IntArray(it.size) }
         for (i in treeRefs.indices step 2) {
             val old = treeRefs[i + 1]
             val next = i / 2
             System.arraycopy(source, old * stride, ordered, next * stride, stride)
+            if (orderedMaterials != null) orderedMaterials[next] = sourceMaterials[old]
             treeRefs[i + 1] = next
         }
         triangles = ordered
+        faceMaterials = orderedMaterials
         nodes = builder.nodes.toArray()
         leaves = builder.leaves.toArray()
         refs = treeRefs
@@ -83,14 +89,17 @@ class PlacedMesh(
     val scale: Float,
     val degrees: Float,
     val offset: Vector,
-    val material: Material
+    val material: Material,
+    /** The file's own materials, one per palette entry, when its colours are used; else [material] throughout. */
+    val palette: List<Material>? = null
 ) : Hittable {
     val cos: Float = kotlin.math.cos(Math.toRadians(degrees.toDouble())).toFloat()
     val sin: Float = kotlin.math.sin(Math.toRadians(degrees.toDouble())).toFloat()
 
     private val cpu: Hittable by lazy {
         val moved = block.mesh.rotatedY(degrees).transformed(scale, Vector(0f, 0f, 0f), offset)
-        BvhNode(HittableList(moved.toHittables(material).toMutableList()))
+        val faces = if (palette != null) moved.toColouredHittables(material) else moved.toHittables(material)
+        BvhNode(HittableList(faces.toMutableList()))
     }
 
     override fun hit(ray: Ray, rayT: Interval): Hit? = cpu.hit(ray, rayT)

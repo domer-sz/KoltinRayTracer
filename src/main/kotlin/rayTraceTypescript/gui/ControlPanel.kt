@@ -122,7 +122,7 @@ class ControlPanel(private val viewer: Viewer, private val frame: JFrame) : JPan
     private val addBlock = JButton("Dodaj graniastosłup")
     private val blockWidth = JSpinner(SpinnerNumberModel(viewer.defaultObjectHeight / 2, 1e-3, 1e6, step))
     private val blockDepth = JSpinner(SpinnerNumberModel(viewer.defaultObjectHeight / 2, 1e-3, 1e6, step))
-    private val materialPreset = JComboBox<Any>((listOf<Any>(CUSTOM) + MaterialPreset.values()).toTypedArray())
+    private val materialPreset = JComboBox<Any>((listOf<Any>(CUSTOM, FILE_COLOURS) + MaterialPreset.values()).toTypedArray())
     private val materialKind = JComboBox(MaterialKind.values())
     private val colour = JButton("Wybierz kolor…")
     private val parameterLabel = JLabel("Parametr")
@@ -248,6 +248,12 @@ class ControlPanel(private val viewer: Viewer, private val frame: JFrame) : JPan
         size.addChangeListener { edit { o -> o.height = size.value as Double } }
         materialPreset.addActionListener {
             if (syncing) return@addActionListener
+            if (materialPreset.selectedItem == FILE_COLOURS) {
+                // Only a model whose file coloured it can go back to those colours.
+                edit { o -> if (o.hasFileColours) o.fileColours = true }
+                refreshSelection()
+                return@addActionListener
+            }
             val chosen = materialPreset.selectedItem as? MaterialPreset ?: return@addActionListener
             editMaterial { o -> o.material = chosen.spec }
             refreshSelection()
@@ -297,6 +303,8 @@ class ControlPanel(private val viewer: Viewer, private val frame: JFrame) : JPan
         if (syncing) return
         val o = viewer.selectedMaterial ?: return
         change(o)
+        // A material set by hand replaces the file's own colours.
+        (o as? PlacedObject)?.fileColours = false
         viewer.sceneChanged()
     }
 
@@ -416,7 +424,7 @@ class ControlPanel(private val viewer: Viewer, private val frame: JFrame) : JPan
         materialFields.forEach { it.isEnabled = mat != null }
         wallReset.isVisible = wall != null
         wallReset.isEnabled = wall?.changed == true
-        if (mat != null) showMaterial(mat.material)
+        if (mat != null) showMaterial(mat.material, (mat as? PlacedObject)?.fileColours == true)
         // Only a loaded model can be stood up from z; only a block has its own width and depth.
         zUp.isEnabled = o?.isModel == true
         blockWidth.isEnabled = o?.shape == Shape.Block
@@ -448,8 +456,8 @@ class ControlPanel(private val viewer: Viewer, private val frame: JFrame) : JPan
      * Shows [spec] in the material fields: the matching ready-made material (or "Własny"), the
      * kind, a colour swatch, and the kind's number with its own name and range.
      */
-    private fun showMaterial(spec: MaterialSpec) {
-        materialPreset.selectedItem = MaterialPreset.values().firstOrNull { it.spec == spec } ?: CUSTOM
+    private fun showMaterial(spec: MaterialSpec, fromFile: Boolean = false) {
+        materialPreset.selectedItem = if (fromFile) FILE_COLOURS else MaterialPreset.values().firstOrNull { it.spec == spec } ?: CUSTOM
         materialKind.selectedItem = spec.kind
         colour.icon = Swatch(spec.screenColor())
         colour.isEnabled = spec.kind != MaterialKind.GLASS
@@ -542,5 +550,7 @@ class ControlPanel(private val viewer: Viewer, private val frame: JFrame) : JPan
         private const val PANEL_WIDTH = 330
         /** The preset list's entry for a material changed by hand. */
         private const val CUSTOM = "Własny"
+        /** The preset list's entry for a model made of the materials its file names. */
+        private const val FILE_COLOURS = "Kolory z pliku"
     }
 }

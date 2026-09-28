@@ -406,13 +406,17 @@ object BookScenes {
         width: Int = 600
     ): SceneDefinition {
         val scene = cornellFinal(samples, width)
-        // -Drt.model.material=glass makes the model glass, like the sphere; matte grey otherwise.
-        val material: Material = when (System.getProperty("rt.model.material")) {
+        // -Drt.model.material=glass makes the model glass, like the sphere; =grey matte grey.
+        // Without it a file that colours its faces (an OBJ with a .mtl) keeps its colours.
+        val chosen = System.getProperty("rt.model.material")
+        val material: Material = when (chosen) {
             "glass" -> Dielectric(1.5f)
             else -> Lambertian(Color(0.45f, 0.45f, 0.45f))
         }
-        val mesh = MeshLoader.load(path)
-            .zUpToYUp()
+        val loaded = MeshLoader.load(path)
+        // Files for 3D printing (STL, 3MF) stand on z; the other formats use y as up.
+        val zUp = path.substringAfterLast('.').lowercase() in setOf("stl", "3mf")
+        val mesh = (if (zUp) loaded.zUpToYUp() else loaded)
             .rotatedY(turnDegrees)
             .standingOnFloor(targetHeight = MODEL_HEIGHT)
             .transformed(1.0f, Vector(0f, 0f, 0f), Vector(360f, 0f, 170f))
@@ -420,7 +424,8 @@ object BookScenes {
 
         // The fill light (-Drt.fill) comes with cornellFinal and is aimed at this model's face.
         val world = scene.world as HittableList
-        val model = BvhNode(HittableList(mesh.toHittables(material).toMutableList()))
+        val faces = if (chosen == null) mesh.toColouredHittables(material) else mesh.toHittables(material)
+        val model = BvhNode(HittableList(faces.toMutableList()))
         world.add(model)
         val modelName = java.io.File(path).nameWithoutExtension
         return SceneDefinition(name = "cornell-model", world = world, camera = scene.camera, parts = scene.parts + ScenePart(modelName, model))

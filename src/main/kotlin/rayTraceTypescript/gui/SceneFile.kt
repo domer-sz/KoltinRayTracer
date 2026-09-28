@@ -17,7 +17,9 @@ class SavedObject(
     val width: Double,
     val depth: Double,
     val zUp: Boolean,
-    val material: MaterialSpec
+    val material: MaterialSpec,
+    /** Made of the materials its file names rather than [material]. */
+    val fileColours: Boolean = false
 )
 
 /** One of the scene's own objects or lights: whether it is in, and where it stands (null: where the scene put it). */
@@ -105,6 +107,7 @@ object SceneFile {
             lines += "$p.material=${o.material.kind.name}"
             lines += "$p.colour=${o.material.red},${o.material.green},${o.material.blue}"
             lines += "$p.parameter=${o.material.parameter}"
+            if (o.fileColours) lines += "$p.fileColours=true"
         }
         file.absoluteFile.parentFile?.mkdirs()
         file.writeText(lines.joinToString("\n", postfix = "\n"), Charsets.UTF_8)
@@ -159,7 +162,8 @@ object SceneFile {
                 width = number("$o.width"),
                 depth = number("$o.depth"),
                 zUp = text("$o.zUp").toBoolean(),
-                material = MaterialSpec(kind, colour[0].toFloat(), colour[1].toFloat(), colour[2].toFloat(), number("$o.parameter"))
+                material = MaterialSpec(kind, colour[0].toFloat(), colour[1].toFloat(), colour[2].toFloat(), number("$o.parameter")),
+                fileColours = p.getProperty("$o.fileColours")?.toBoolean() ?: false
             )
             i++
         }

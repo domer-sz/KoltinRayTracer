@@ -158,6 +158,9 @@ class SceneFlattener private constructor() {
         val block = placed.block
         val base = triangleMaterials.size
         val material = registerMaterial(placed.material)
+        // The file's own materials, when its colours are used: registered once each.
+        val faces = block.faceMaterials
+        val paletteIds = placed.palette?.takeIf { faces != null }?.map { registerMaterial(it) }
         val source = block.triangles
         val stride = SceneBuffers.TRIANGLE_STRIDE
         val c = placed.cos
@@ -177,7 +180,7 @@ class SceneFlattener private constructor() {
                 triangles.add((-s * x + c * z) * k + if (point) o.z else 0.0f)
                 triangles.add(0.0f)
             }
-            triangleMaterials.add(material)
+            triangleMaterials.add(if (paletteIds != null) paletteIds.getOrElse(faces!![t]) { material } else material)
         }
         val root = bvh.graft(placed, base)
         // Its box is what its root's two children cover, so the tree above holds them whole.

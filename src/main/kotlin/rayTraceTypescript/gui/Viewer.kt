@@ -384,7 +384,7 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
                     Shape.Ball -> "ball"
                     Shape.Block -> "block"
                 }
-                SavedObject(o.name, shape, o.source, o.x, o.y, o.z, o.rotation, o.height, o.width, o.depth, o.zUp, o.material)
+                SavedObject(o.name, shape, o.source, o.x, o.y, o.z, o.rotation, o.height, o.width, o.depth, o.zUp, o.material, o.fileColours)
             },
             depth = maxDepth,
             walls = walls.filter { it.changed }.map { SavedWall(it.part.name, it.material) }
@@ -446,6 +446,7 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
                         depth = o.depth
                         zUp = o.zUp
                         material = o.material
+                        fileColours = o.fileColours && hasFileColours
                         prepare()
                     }
                 }

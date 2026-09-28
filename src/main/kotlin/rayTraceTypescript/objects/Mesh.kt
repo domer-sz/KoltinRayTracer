@@ -14,14 +14,24 @@ import rayTraceTypescript.materials.Material
  * the model to a workable height and puts it centred on the floor, where the scenes in this
  * project put their ground.
  */
-class Mesh(val vertices: FloatArray) {
+class Mesh(
+    val vertices: FloatArray,
+    /** Each triangle's entry in [palette], when the file gave its faces materials. */
+    val faceMaterials: IntArray? = null,
+    /** The materials the file names (an OBJ's .mtl), in the order [faceMaterials] counts them. */
+    val palette: List<MeshMaterial> = emptyList()
+) {
 
     init {
         require(vertices.isNotEmpty()) { "Mesh has no triangles" }
         require(vertices.size % VERTEX_FLOATS == 0) { "Expected $VERTEX_FLOATS floats per triangle" }
+        require(faceMaterials == null || faceMaterials.size == vertices.size / VERTEX_FLOATS) { "One material per triangle" }
     }
 
     val triangleCount: Int get() = vertices.size / VERTEX_FLOATS
+
+    /** Whether the file coloured its faces itself. */
+    val hasColours: Boolean get() = faceMaterials != null && palette.isNotEmpty()
 
     fun bounds(): Aabb {
         var minX = Float.POSITIVE_INFINITY; var minY = Float.POSITIVE_INFINITY; var minZ = Float.POSITIVE_INFINITY
@@ -60,7 +70,7 @@ class Mesh(val vertices: FloatArray) {
             moved[i + 2] = (vertices[i + 2] - pivot.z) * scale + target.z
             i += 3
         }
-        return Mesh(moved)
+        return Mesh(moved, faceMaterials, palette)
     }
 
     /**
@@ -87,16 +97,30 @@ class Mesh(val vertices: FloatArray) {
             moved[i] = out[0]; moved[i + 1] = out[1]; moved[i + 2] = out[2]
             i += 3
         }
-        return Mesh(moved)
+        return Mesh(moved, faceMaterials, palette)
     }
 
-    fun toHittables(material: Material): List<Hittable> = (0 until triangleCount).map { index ->
+    /** Every triangle made of [material]. */
+    fun toHittables(material: Material): List<Hittable> = toHittables { material }
+
+    /**
+     * Every triangle made of what the file gave it, when it gave colours, and of [fallback]
+     * otherwise.
+     */
+    fun toColouredHittables(fallback: Material): List<Hittable> {
+        val faces = faceMaterials
+        if (faces == null || palette.isEmpty()) return toHittables(fallback)
+        val materials = palette.map { it.material() }
+        return toHittables { index -> materials.getOrElse(faces[index]) { fallback } }
+    }
+
+    private inline fun toHittables(materialOf: (Int) -> Material): List<Hittable> = (0 until triangleCount).map { index ->
         val at = index * VERTEX_FLOATS
         Triangle(
             Point(vertices[at], vertices[at + 1], vertices[at + 2]),
             Point(vertices[at + 3], vertices[at + 4], vertices[at + 5]),
             Point(vertices[at + 6], vertices[at + 7], vertices[at + 8]),
-            material
+            materialOf(index)
         )
     }
 
