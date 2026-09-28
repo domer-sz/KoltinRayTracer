@@ -23,7 +23,6 @@ import java.awt.Font
 import java.awt.Graphics
 import java.awt.Graphics2D
 import java.awt.RenderingHints
-import java.awt.event.KeyAdapter
 import java.awt.event.KeyEvent
 import java.awt.event.MouseAdapter
 import java.awt.event.MouseEvent
@@ -43,6 +42,7 @@ import javax.swing.JFileChooser
 import javax.swing.JFrame
 import javax.swing.JOptionPane
 import javax.swing.filechooser.FileNameExtensionFilter
+import javax.swing.JLabel
 import javax.swing.JPanel
 import javax.swing.SwingUtilities
 import kotlin.math.asin
@@ -69,6 +69,11 @@ import kotlin.math.tan
  * count quadruples and once more at the end.
  */
 class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
+    init {
+        // Before any Swing component exists: the look applies to what is made after it.
+        Theme.install()
+    }
+
     private val base: Camera = scene.camera
 
     /** The camera as an orbit around [target]; everything the mouse changes. Compared by identity. */
@@ -142,7 +147,14 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
     val selectedMaterial: HasMaterial? get() = selected as? HasMaterial
 
     @Volatile private var shown: BufferedImage? = null
+    private val statusLabel = JLabel("Przygotowuję scenę…")
+    /** The status bar's text; set from any thread, shown on the UI thread. */
     @Volatile private var status = "Przygotowuję scenę…"
+        set(value) {
+            if (field == value) return
+            field = value
+            SwingUtilities.invokeLater { statusLabel.text = value }
+        }
     @Volatile private var placeMarker: java.awt.Point? = null
     /** Where a Ctrl-dragged model would stand, while the button is held. */
     @Volatile private var ghost: DoubleArray? = null
@@ -165,14 +177,15 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
             frame.defaultCloseOperation = JFrame.DISPOSE_ON_CLOSE
             controls = ControlPanel(this, frame)
             val display = fit(sceneResolution)
-            panel.preferredSize = Dimension(display.width, display.height + STATUS_HEIGHT)
+            panel.preferredSize = Dimension(display.width, display.height)
             frame.contentPane.add(panel, BorderLayout.CENTER)
             // The panel scrolls when the window is shorter than its fields.
             frame.contentPane.add(javax.swing.JScrollPane(controls).apply {
                 horizontalScrollBarPolicy = javax.swing.ScrollPaneConstants.HORIZONTAL_SCROLLBAR_NEVER
-                border = null
+                border = javax.swing.BorderFactory.createMatteBorder(0, 1, 0, 0, Theme.separator)
                 verticalScrollBar.unitIncrement = 16
             }, BorderLayout.EAST)
+            frame.contentPane.add(statusBar(), BorderLayout.SOUTH)
             frame.pack()
             frame.setLocationRelativeTo(null)
             frame.addWindowListener(object : WindowAdapter() {
@@ -201,6 +214,20 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
         val renderThread = Thread({ renderLoop() }, "viewer-render").apply { start() }
         closed.await()
         renderThread.join()
+    }
+
+    /** The strip along the bottom: what the renderer is doing on the left, the main gestures on the right. */
+    private fun statusBar(): JPanel = JPanel(BorderLayout(16, 0)).apply {
+        border = javax.swing.BorderFactory.createCompoundBorder(
+            javax.swing.BorderFactory.createMatteBorder(1, 0, 0, 0, Theme.separator),
+            javax.swing.BorderFactory.createEmptyBorder(6, 12, 6, 12)
+        )
+        statusLabel.font = Theme.font(12.5f)
+        add(statusLabel, BorderLayout.CENTER)
+        add(JLabel(HELP).apply {
+            font = Theme.font(11.5f)
+            foreground = Theme.muted
+        }, BorderLayout.EAST)
     }
 
     /** The window's first size: the image at most 900 pixels tall and 1200 wide on screen. */
@@ -971,25 +998,42 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
         panel.addMouseMotionListener(mouse)
         panel.addMouseWheelListener(mouse)
 
-        panel.addKeyListener(object : KeyAdapter() {
-            override fun keyPressed(e: KeyEvent) {
-                when (e.keyCode) {
-                    KeyEvent.VK_R -> { view = initialView; touch() }
-                    KeyEvent.VK_D -> { denoiseOn = !denoiseOn; controls.syncDenoise() }
-                    KeyEvent.VK_T -> { raytrace = !raytrace; controls.syncMode() }
-                    KeyEvent.VK_S -> if (e.isControlDown) controls.chooseSceneToSave() else chooseSave(frame)
-                    KeyEvent.VK_O -> if (e.isControlDown) controls.chooseSceneToLoad()
-                    KeyEvent.VK_PLUS, KeyEvent.VK_ADD, KeyEvent.VK_EQUALS -> { view = view.with(vfov = (view.vfov - 2).coerceAtLeast(5.0)); touch() }
-                    KeyEvent.VK_MINUS, KeyEvent.VK_SUBTRACT -> { view = view.with(vfov = (view.vfov + 2).coerceAtMost(120.0)); touch() }
-                    KeyEvent.VK_DELETE -> selected?.let { removeObject(it); controls.refreshObjects() }
-                    KeyEvent.VK_F1, KeyEvent.VK_H -> HelpDialog.show(frame)
-                    KeyEvent.VK_LEFT, KeyEvent.VK_RIGHT, KeyEvent.VK_UP, KeyEvent.VK_DOWN,
-                    KeyEvent.VK_PAGE_UP, KeyEvent.VK_PAGE_DOWN, KeyEvent.VK_Q, KeyEvent.VK_E,
-                    KeyEvent.VK_OPEN_BRACKET, KeyEvent.VK_CLOSE_BRACKET -> nudge(e.keyCode, e.isShiftDown)
-                    KeyEvent.VK_ESCAPE -> frame.dispose()
-                }
-            }
-        })
+        // Shortcuts work wherever the focus is in the window - on the image, a button, the object
+        // list - except in a field being typed into, where keys are text. On the list the arrows
+        // keep choosing rows.
+        java.awt.KeyboardFocusManager.getCurrentKeyboardFocusManager().addKeyEventDispatcher { e ->
+            if (e.id != KeyEvent.KEY_PRESSED || !frame.isActive) return@addKeyEventDispatcher false
+            val owner = java.awt.KeyboardFocusManager.getCurrentKeyboardFocusManager().focusOwner
+            if (owner is javax.swing.text.JTextComponent) return@addKeyEventDispatcher false
+            val arrow = e.keyCode in intArrayOf(KeyEvent.VK_LEFT, KeyEvent.VK_RIGHT, KeyEvent.VK_UP, KeyEvent.VK_DOWN)
+            if (arrow && owner is javax.swing.JList<*>) return@addKeyEventDispatcher false
+            // Space and Enter press the focused button, Esc closes an open drop-down: leave those
+            // to the control. Esc closes the window only from the image.
+            val controlKey = e.keyCode == KeyEvent.VK_SPACE || e.keyCode == KeyEvent.VK_ENTER || e.keyCode == KeyEvent.VK_ESCAPE
+            if (controlKey && owner !== panel) return@addKeyEventDispatcher false
+            shortcut(e, frame)
+        }
+    }
+
+    /** Runs the shortcut for [e]; false when the key is not one. */
+    private fun shortcut(e: KeyEvent, frame: JFrame): Boolean {
+        when (e.keyCode) {
+            KeyEvent.VK_R -> { view = initialView; touch() }
+            KeyEvent.VK_D -> { denoiseOn = !denoiseOn; controls.syncDenoise() }
+            KeyEvent.VK_T -> { raytrace = !raytrace; controls.syncMode() }
+            KeyEvent.VK_S -> if (e.isControlDown) controls.chooseSceneToSave() else chooseSave(frame)
+            KeyEvent.VK_O -> if (e.isControlDown) controls.chooseSceneToLoad() else return false
+            KeyEvent.VK_PLUS, KeyEvent.VK_ADD, KeyEvent.VK_EQUALS -> { view = view.with(vfov = (view.vfov - 2).coerceAtLeast(5.0)); touch() }
+            KeyEvent.VK_MINUS, KeyEvent.VK_SUBTRACT -> { view = view.with(vfov = (view.vfov + 2).coerceAtMost(120.0)); touch() }
+            KeyEvent.VK_DELETE -> selected?.let { removeObject(it); controls.refreshObjects() }
+            KeyEvent.VK_F1, KeyEvent.VK_H -> HelpDialog.show(frame)
+            KeyEvent.VK_LEFT, KeyEvent.VK_RIGHT, KeyEvent.VK_UP, KeyEvent.VK_DOWN,
+            KeyEvent.VK_PAGE_UP, KeyEvent.VK_PAGE_DOWN, KeyEvent.VK_Q, KeyEvent.VK_E,
+            KeyEvent.VK_OPEN_BRACKET, KeyEvent.VK_CLOSE_BRACKET -> nudge(e.keyCode, e.isShiftDown)
+            KeyEvent.VK_ESCAPE -> frame.dispose()
+            else -> return false
+        }
+        return true
     }
 
     /** Ctrl + drag: where the selected model would land, shown as its box until the button is let go. */
@@ -1065,16 +1109,16 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
 
     private fun dolly(radius: Double, steps: Double): Double = (radius * Math.pow(ZOOM_STEP, steps)).coerceIn(1.0, 1e5)
 
-    /** Draws the latest image, scaled to fit, the placement marker, and the status line. */
+    /** Draws the latest image, scaled to fit, and the placement marker. */
     private inner class ImagePanel : JPanel() {
         init {
-            background = Color(0x131211)
+            background = Theme.canvas
             isFocusable = true
         }
 
-        /** Where the image goes: as large as fits above the status line, proportions kept. */
+        /** Where the image goes: as large as fits, centred, proportions kept. */
         fun imageBounds(): java.awt.Rectangle {
-            val available = (height - STATUS_HEIGHT).coerceAtLeast(1)
+            val available = height.coerceAtLeast(1)
             val aspect = resolution.width.toDouble() / resolution.height
             val w = minOf(width.toDouble(), available * aspect)
             val h = w / aspect
@@ -1101,7 +1145,8 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
                     )
                 }
             }
-            g2.color = Color(0xE8C547)
+            g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+            g2.color = Theme.accent
             g2.stroke = BasicStroke(1.6f)
             // The 12 edges: corners that differ in exactly one of the three bits.
             for (i in 0 until 8) for (bit in intArrayOf(1, 2, 4)) {
@@ -1123,18 +1168,13 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
             }
             drawGhost(g2)
             placeMarker?.let { p ->
-                g2.color = Color(0xE8C547)
+                g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON)
+                g2.color = Theme.accent
                 g2.stroke = BasicStroke(2f)
                 g2.drawOval(p.x - 10, p.y - 10, 20, 20)
                 g2.drawLine(p.x - 16, p.y, p.x + 16, p.y)
                 g2.drawLine(p.x, p.y - 16, p.x, p.y + 16)
             }
-            g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON)
-            g2.font = Font(Font.SANS_SERIF, Font.PLAIN, 12)
-            g2.color = Color(0xECE8E3)
-            g2.drawString(status, 10, height - 28)
-            g2.color = Color(0x9B948C)
-            g2.drawString(HELP, 10, height - 10)
         }
     }
 
@@ -1161,8 +1201,7 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
         private const val TURN_STEP = 15.0
         /** A surface counts as one to stand on when its normal is within ~45 degrees of up. */
         private const val UPWARD = 0.7
-        private const val STATUS_HEIGHT = 44
         private const val HELP =
-            "F1 / H: wszystkie skróty · T szybki podgląd / ray tracing · LPM obrót · Shift+LPM przesuwanie · kółko zoom · Ctrl+LPM postaw obiekt · S zapis"
+            "LPM obrót · Shift+LPM przesuń · kółko zoom · Ctrl+LPM postaw · T tryb · S zapis · F1 skróty"
     }
 }

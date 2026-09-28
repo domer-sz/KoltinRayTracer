@@ -20,7 +20,8 @@ import javax.swing.JList
 import javax.swing.JOptionPane
 import javax.swing.JPanel
 import javax.swing.JProgressBar
-import javax.swing.JRadioButton
+import javax.swing.JSeparator
+import javax.swing.JToggleButton
 import javax.swing.JScrollPane
 import javax.swing.JSpinner
 import javax.swing.ListSelectionModel
@@ -59,10 +60,17 @@ class ControlPanel(private val viewer: Viewer, private val frame: JFrame) : JPan
     private val saveSceneButton = JButton("Zapisz…").apply { toolTipText = "Zapisz scenę do pliku .${SceneFile.EXTENSION} (Ctrl+S)" }
     private val loadSceneButton = JButton("Wczytaj…").apply { toolTipText = "Wczytaj scenę z pliku .${SceneFile.EXTENSION} (Ctrl+O)" }
     private var lastSceneFolder: File = File(".").absoluteFile
-    private val quick = JRadioButton("Szybki podgląd", !viewer.raytrace)
-    private val raytrace = JRadioButton("Ray tracing", viewer.raytrace)
+    private val quick = JToggleButton("Szybki podgląd", !viewer.raytrace)
+    private val raytrace = JToggleButton("Ray tracing", viewer.raytrace)
     private val denoise = JCheckBox("Odszumianie (D)", viewer.denoiseOn)
-    private val save = JButton("Zapisz obraz (S)")
+    private val save = JButton("Zapisz obraz (S)").apply {
+        // The one action most sessions end with: drawn in the accent colour.
+        putClientProperty(
+            "FlatLaf.style",
+            "background: \$Button.default.background; foreground: \$Button.default.foreground; " +
+                "borderColor: \$Button.default.borderColor; font: bold"
+        )
+    }
 
     private val lightSwitches = viewer.lights.map { light ->
         JCheckBox(light.part.name, light.enabled).apply {
@@ -74,8 +82,33 @@ class ControlPanel(private val viewer: Viewer, private val frame: JFrame) : JPan
     private val listModel = DefaultListModel<SceneEntry>()
     private val list = JList(listModel).apply {
         selectionMode = ListSelectionModel.SINGLE_SELECTION
-        visibleRowCount = 5
+        visibleRowCount = 6
+        fixedCellHeight = 24
+        // Each row: the name, and what kind of thing it is in a quieter colour.
+        cellRenderer = object : javax.swing.DefaultListCellRenderer() {
+            override fun getListCellRendererComponent(
+                list: JList<*>?, value: Any?, index: Int, isSelected: Boolean, cellHasFocus: Boolean
+            ): Component {
+                val kind = when (value) {
+                    is WallObject -> "ściana"
+                    is BuiltInObject -> "obiekt sceny"
+                    is PlacedObject -> when (value.shape) {
+                        is Shape.Model -> "model"
+                        Shape.Ball -> "kula"
+                        Shape.Block -> "graniastosłup"
+                    }
+                    else -> ""
+                }
+                val tint = Theme.hex(if (isSelected) javax.swing.UIManager.getColor("List.selectionForeground") ?: Theme.text else Theme.muted)
+                val text = "<html>${escapeHtml(value.toString())}&nbsp;&nbsp;<span style='color:$tint; font-size:90%'>$kind</span></html>"
+                return super.getListCellRendererComponent(list, text, index, isSelected, cellHasFocus).apply {
+                    (this as javax.swing.JLabel).border = BorderFactory.createEmptyBorder(0, 8, 0, 8)
+                }
+            }
+        }
     }
+
+    private fun escapeHtml(s: String) = s.replace("&", "&amp;").replace("<", "&lt;").replace(">", "&gt;")
     private val add = JButton("Dodaj model…")
     private val remove = JButton("Usuń")
     private val centre = JButton("Na środek widoku")
@@ -95,7 +128,7 @@ class ControlPanel(private val viewer: Viewer, private val frame: JFrame) : JPan
     private val parameterLabel = JLabel("Parametr")
     private val parameter = JSpinner(SpinnerNumberModel(0.0, 0.0, 100.0, 0.05))
     private val zUp = JCheckBox("Oś Z w górę (pliki do druku 3D)")
-    private val info = JLabel(" ")
+    private val info = JLabel(" ").apply { foreground = Theme.muted }
     /** Fields for anything that can be moved: an added object or one of the scene's own. */
     private val placeFields: List<Component> = listOf(centre, posX, posY, posZ, turn)
     /** Fields only an added object has: its size and what it is made of. */
@@ -107,7 +140,7 @@ class ControlPanel(private val viewer: Viewer, private val frame: JFrame) : JPan
     private var lastFolder: File? = File("../stls").takeIf { it.isDirectory } ?: File(".")
 
     init {
-        border = BorderFactory.createEmptyBorder(10, 10, 10, 10)
+        border = BorderFactory.createEmptyBorder(12, 14, 14, 14)
 
         section("Scena")
         full(JPanel(GridBagLayout()).apply {
@@ -117,9 +150,16 @@ class ControlPanel(private val viewer: Viewer, private val frame: JFrame) : JPan
 
         section("Tryb (T)")
         ButtonGroup().apply { add(quick); add(raytrace) }
+        // Two halves of one switch; the chosen mode lights up in the accent colour.
+        for (b in listOf(quick, raytrace)) {
+            b.putClientProperty(
+                "FlatLaf.style",
+                "selectedBackground: \$Button.default.background; selectedForeground: \$Button.default.foreground"
+            )
+        }
         full(JPanel(GridBagLayout()).apply {
-            add(quick, GridBagConstraints().apply { weightx = 1.0; anchor = GridBagConstraints.WEST })
-            add(raytrace, GridBagConstraints().apply { weightx = 1.0; anchor = GridBagConstraints.WEST })
+            add(quick, GridBagConstraints().apply { weightx = 1.0; fill = GridBagConstraints.HORIZONTAL; insets = Insets(0, 0, 0, 4) })
+            add(raytrace, GridBagConstraints().apply { weightx = 1.0; fill = GridBagConstraints.HORIZONTAL })
         })
 
         section("Obraz")
@@ -145,7 +185,7 @@ class ControlPanel(private val viewer: Viewer, private val frame: JFrame) : JPan
             add(addBall, GridBagConstraints().apply { weightx = 1.0; fill = GridBagConstraints.HORIZONTAL; insets = Insets(0, 0, 0, 4) })
             add(addBlock, GridBagConstraints().apply { weightx = 1.0; fill = GridBagConstraints.HORIZONTAL })
         })
-        full(JScrollPane(list).apply { preferredSize = Dimension(250, 110); minimumSize = Dimension(250, 110) })
+        full(JScrollPane(list).apply { preferredSize = Dimension(250, 150); minimumSize = Dimension(250, 150) })
         full(JPanel(GridBagLayout()).apply {
             add(remove, GridBagConstraints().apply { weightx = 1.0; fill = GridBagConstraints.HORIZONTAL; insets = Insets(0, 0, 0, 4) })
             add(centre, GridBagConstraints().apply { weightx = 1.0; fill = GridBagConstraints.HORIZONTAL })
@@ -157,7 +197,7 @@ class ControlPanel(private val viewer: Viewer, private val frame: JFrame) : JPan
         field("Wysokość", size)
         field("Szerokość", blockWidth)
         field("Głębokość", blockDepth)
-        section("Materiał zaznaczonego obiektu")
+        section("Materiał")
         field("Gotowy", materialPreset)
         field("Rodzaj", materialKind)
         field("Kolor", colour)
@@ -166,7 +206,10 @@ class ControlPanel(private val viewer: Viewer, private val frame: JFrame) : JPan
         full(zUp)
         full(info)
         if (viewer.builtIns.any { !it.part.isLight }) full(restore)
-        full(JLabel("<html><small>Ctrl + przeciąganie przestawia zaznaczony obiekt, strzałki go przesuwają (F1: wszystkie skróty).</small></html>"))
+        full(JLabel("<html>Ctrl + przeciąganie przestawia zaznaczony obiekt, strzałki go przesuwają, Q / E obracają.</html>").apply {
+            font = Theme.font(11.5f)
+            foreground = Theme.muted
+        })
         add(JPanel(), GridBagConstraints().apply { gridy = row++; weighty = 1.0 })
 
         preset.addActionListener {
@@ -461,10 +504,19 @@ class ControlPanel(private val viewer: Viewer, private val frame: JFrame) : JPan
         editor = JSpinner.NumberEditor(this, "0.##")
     }
 
+    /** A section heading: its title in small capitals, then a rule to the panel's edge. */
     private fun section(title: String) {
-        add(JLabel(title).apply { font = font.deriveFont(java.awt.Font.BOLD) }, GridBagConstraints().apply {
-            gridx = 0; gridy = row++; gridwidth = 2; anchor = GridBagConstraints.WEST
-            insets = Insets(if (row > 1) 14 else 0, 0, 6, 0)
+        val heading = JPanel(GridBagLayout()).apply {
+            isOpaque = false
+            add(JLabel(title.uppercase()).apply {
+                font = Theme.font(11f, bold = true)
+                foreground = Theme.muted
+            }, GridBagConstraints().apply { anchor = GridBagConstraints.WEST; insets = Insets(0, 0, 0, 8) })
+            add(JSeparator(), GridBagConstraints().apply { weightx = 1.0; fill = GridBagConstraints.HORIZONTAL })
+        }
+        add(heading, GridBagConstraints().apply {
+            gridx = 0; gridy = row++; gridwidth = 2; weightx = 1.0; fill = GridBagConstraints.HORIZONTAL
+            insets = Insets(if (row > 1) 18 else 2, 0, 8, 0)
         })
     }
 
@@ -487,7 +539,7 @@ class ControlPanel(private val viewer: Viewer, private val frame: JFrame) : JPan
     }
 
     companion object {
-        private const val PANEL_WIDTH = 300
+        private const val PANEL_WIDTH = 330
         /** The preset list's entry for a material changed by hand. */
         private const val CUSTOM = "Własny"
     }

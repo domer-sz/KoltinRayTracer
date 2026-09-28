@@ -57,14 +57,21 @@ object HelpDialog {
         )
     )
 
-    private val html: String = buildString {
-        append("<html><body style='font-family:sans-serif; font-size:11pt; margin:4px'>")
+    /** Built when first shown, once the theme is in, so it takes the theme's colours. */
+    private val html: String by lazy { page() }
+
+    private fun page(): String = buildString {
+        val text = Theme.hex(Theme.text)
+        val muted = Theme.hex(Theme.muted)
+        val accent = Theme.hex(Theme.accent)
+        append("<html><head><style>h3 { color:$muted; font-size:10pt; margin-top:14px } b { color:$accent }</style></head>")
+        append("<body style='font-family:sans-serif; font-size:11pt; margin:4px; color:$text'>")
         append("<p style='margin-top:0'>Okno startuje w szybkim podglądzie: jeden promień na piksel, kolory powierzchni ")
         append("bez odbić i cieni, szkło półprzezroczyste - obraz jest od razu ostry, a przesuwanie obiektów natychmiastowe. ")
         append("T przełącza na ray tracing: podczas ruchu kamery 1/4 rozdzielczości przy 1 spp, ")
         append("po zatrzymaniu obraz dochodzi do pełnej jakości i jest odszumiany co 4× więcej próbek.</p>")
         for ((title, rows) in sections) {
-            append("<h3 style='margin-bottom:4px'>$title</h3><table cellspacing='0' cellpadding='3'>")
+            append("<h3 style='margin-bottom:4px'>${title.uppercase()}</h3><table cellspacing='0' cellpadding='3'>")
             for ((keys, action) in rows) {
                 append("<tr><td style='white-space:nowrap; padding-right:14px'><b>$keys</b></td><td>$action</td></tr>")
             }
@@ -85,7 +92,7 @@ object HelpDialog {
         for (key in listOf(KeyEvent.VK_ESCAPE, KeyEvent.VK_F1, KeyEvent.VK_H)) {
             dialog.rootPane.registerKeyboardAction({ dialog.dispose() }, KeyStroke.getKeyStroke(key, 0), JComponent.WHEN_IN_FOCUSED_WINDOW)
         }
-        dialog.setSize(560, 560)
+        dialog.setSize(640, 640)
         dialog.setLocationRelativeTo(owner)
         dialog.isVisible = true
     }

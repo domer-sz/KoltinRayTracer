@@ -79,6 +79,12 @@
       <artifactId>lwjgl</artifactId>
       <classifier>natives-macos-arm64</classifier>
     </dependency>
+    <!-- The viewer's look: a modern flat dark theme for Swing. -->
+    <dependency>
+      <groupId>com.formdev</groupId>
+      <artifactId>flatlaf</artifactId>
+      <version>3.5.4</version>
+    </dependency>
     <dependency>
       <groupId>org.junit.jupiter</groupId>
       <artifactId>junit-jupiter</artifactId>
