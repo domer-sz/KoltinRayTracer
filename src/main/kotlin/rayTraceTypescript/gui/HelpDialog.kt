@@ -43,7 +43,8 @@ object HelpDialog {
             "T" to "Szybki podgląd (domyślny, do ustawiania sceny) / ray tracing",
             "D" to "Odszumianie włącz / wyłącz (ray tracing)",
             "S" to "Zapisz obraz pod wybraną nazwą (PPM i PNG, z odszumioną kopią)",
-            "Panel: rozdzielczość, Cel spp" to "Rozmiar obrazu i liczba próbek, przy której render się kończy"
+            "Panel: rozdzielczość, Cel spp" to "Rozmiar obrazu i liczba próbek, przy której render się kończy",
+            "Panel: Odbicia (maks.)" to "Ile razy promień może się odbić lub załamać (ray tracing); mniej - szybciej, ciemniej w szkle i zakamarkach"
         ),
         "Scena" to listOf(
             "Ctrl + S" to "Zapisz scenę do pliku .rtscene: kamera, rozdzielczość, spp, tryb, światła, obiekty z materiałami",

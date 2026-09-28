@@ -107,6 +107,8 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
     @Volatile var resolution = sceneResolution
         set(value) { field = value; touch() }
     @Volatile var targetSamples = maxOf(base.samplesPerPixel, DEFAULT_TARGET)
+    /** How many times a path may bounce before it is cut off (the scene's own value to start). */
+    @Volatile var maxDepth = base.maxReflectionDepth.coerceAtLeast(1)
     @Volatile var denoiseOn = true
     /**
      * Ray tracing, or (the default, for setting the scene up) the quick look: one ray per pixel
@@ -349,7 +351,8 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
                     Shape.Block -> "block"
                 }
                 SavedObject(o.name, shape, o.source, o.x, o.y, o.z, o.rotation, o.height, o.width, o.depth, o.zUp, o.material)
-            }
+            },
+            depth = maxDepth
         )
         SceneFile.write(file, saved)
         status = "Zapisano scenę ${file.name}"
@@ -427,6 +430,7 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
                 }
                 selected = null
                 targetSamples = s.samples.coerceAtLeast(1)
+                if (s.depth > 0) maxDepth = s.depth
                 raytrace = s.raytrace
                 denoiseOn = s.denoise
                 view = View(doubleArrayOf(s.camera[0], s.camera[1], s.camera[2]), s.camera[3], s.camera[4], s.camera[5], s.camera[6])
@@ -528,6 +532,7 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
         var accumulated: View? = null
         var accumulatedSize: Resolution? = null
         var accumulatedRaytrace = false
+        var accumulatedDepth = 0
         var setup: CameraSetup? = null
         var pixels = FloatArray(0)
         var samples = 0
@@ -612,7 +617,9 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
                 continue
             }
 
-            if (current !== accumulated || size != accumulatedSize || !accumulatedRaytrace) {
+            if (current !== accumulated || size != accumulatedSize || !accumulatedRaytrace || maxDepth != accumulatedDepth) {
+                // Noted before the setup reads it: a change in between restarts on the next pass.
+                accumulatedDepth = maxDepth
                 setup = setup(current, size)
                 session.setCamera(setup)
                 pixels = FloatArray(setup.totalPixels * 3)
@@ -732,7 +739,7 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
             aspectRatio = size.width / (size.height + 0.25f)
             imageWidth = size.width
             samplesPerPixel = base.samplesPerPixel
-            maxReflectionDepth = base.maxReflectionDepth
+            maxReflectionDepth = maxDepth
             vfov = view.vfov.toFloat()
             lookFrom = Point(from[0].toFloat(), from[1].toFloat(), from[2].toFloat())
             lookAt = Point(view.target[0].toFloat(), view.target[1].toFloat(), view.target[2].toFloat())

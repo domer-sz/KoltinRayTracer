@@ -51,6 +51,10 @@ class ControlPanel(private val viewer: Viewer, private val frame: JFrame) : JPan
     private val height = JSpinner(SpinnerNumberModel(viewer.sceneResolution.height, 64, 8192, 16))
     private val applySize = JButton("Zastosuj rozdzielczość")
     private val target = JSpinner(SpinnerNumberModel(viewer.targetSamples, 1, 1_000_000, 64))
+    private val depth = JSpinner(SpinnerNumberModel(viewer.maxDepth, 1, 500, 1)).apply {
+        toolTipText = "Ile razy promień może się odbić lub załamać, zanim ścieżka się urwie. " +
+            "Mniej: szybciej, ciemniej w zakamarkach i w szkle; więcej: pełniejsze światło odbite."
+    }
     private val progress = JProgressBar(0, 1000).apply { isStringPainted = true }
     private val saveSceneButton = JButton("Zapisz…").apply { toolTipText = "Zapisz scenę do pliku .${SceneFile.EXTENSION} (Ctrl+S)" }
     private val loadSceneButton = JButton("Wczytaj…").apply { toolTipText = "Wczytaj scenę z pliku .${SceneFile.EXTENSION} (Ctrl+O)" }
@@ -121,6 +125,7 @@ class ControlPanel(private val viewer: Viewer, private val frame: JFrame) : JPan
         field("Wysokość", height)
         full(applySize)
         field("Cel spp", target)
+        field("Odbicia (maks.)", depth)
         full(progress)
         full(denoise)
         full(save)
@@ -171,6 +176,7 @@ class ControlPanel(private val viewer: Viewer, private val frame: JFrame) : JPan
             viewer.resolution = Viewer.Resolution(width.value as Int, height.value as Int)
         }
         target.addChangeListener { viewer.targetSamples = target.value as Int }
+        depth.addChangeListener { viewer.maxDepth = depth.value as Int }
         denoise.addActionListener { viewer.denoiseOn = denoise.isSelected }
         saveSceneButton.addActionListener { chooseSceneToSave() }
         loadSceneButton.addActionListener { chooseSceneToLoad() }
@@ -316,6 +322,7 @@ class ControlPanel(private val viewer: Viewer, private val frame: JFrame) : JPan
         width.value = viewer.resolution.width
         height.value = viewer.resolution.height
         target.value = viewer.targetSamples
+        depth.value = viewer.maxDepth
         lightSwitches.forEachIndexed { i, box -> box.isSelected = viewer.lights[i].enabled }
         syncing = false
         syncDenoise()
@@ -422,6 +429,7 @@ class ControlPanel(private val viewer: Viewer, private val frame: JFrame) : JPan
         quick.isSelected = !viewer.raytrace
         raytrace.isSelected = viewer.raytrace
         target.isEnabled = viewer.raytrace
+        depth.isEnabled = viewer.raytrace
         denoise.isEnabled = viewer.raytrace
     }
 

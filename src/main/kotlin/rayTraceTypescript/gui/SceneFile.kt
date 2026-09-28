@@ -38,7 +38,9 @@ class SavedScene(
     val denoise: Boolean,
     /** The scene's own objects and lights, whether each is in, and any that were moved. */
     val parts: List<SavedPart>,
-    val objects: List<SavedObject>
+    val objects: List<SavedObject>,
+    /** How many bounces a path may take; 0 keeps the scene's own. */
+    val depth: Int = 0
 )
 
 /**
@@ -67,6 +69,7 @@ object SceneFile {
         lines += "image.width=${s.width}"
         lines += "image.height=${s.height}"
         lines += "image.samples=${s.samples}"
+        if (s.depth > 0) lines += "image.depth=${s.depth}"
         lines += "mode=${if (s.raytrace) "raytrace" else "quick"}"
         lines += "denoise=${s.denoise}"
         s.parts.forEachIndexed { i, part ->
@@ -150,7 +153,8 @@ object SceneFile {
             raytrace = p.getProperty("mode") == "raytrace",
             denoise = p.getProperty("denoise")?.toBoolean() ?: true,
             parts = parts,
-            objects = objects
+            objects = objects,
+            depth = p.getProperty("image.depth")?.toIntOrNull() ?: 0
         )
     }
 

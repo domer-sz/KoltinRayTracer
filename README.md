@@ -91,7 +91,9 @@ próbki do celu ustawionego w panelu i jest odszumiany przy 16, 64, 256… prób
 - **Scena** – *Zapisz…* / *Wczytaj…* (Ctrl+S / Ctrl+O): cała scena w pliku tekstowym `.rtscene`.
 - **Tryb** – szybki podgląd albo ray tracing (to samo co `T`).
 - **Obraz** – gotowe rozdzielczości albo własna szerokość i wysokość (*Zastosuj rozdzielczość*),
-  **Cel spp** (liczba próbek, przy której render się kończy) z paskiem postępu, odszumianie, zapis.
+  **Cel spp** (liczba próbek, przy której render się kończy) z paskiem postępu, **Odbicia (maks.)**
+  – ile razy promień może się odbić lub załamać (domyślnie wartość sceny, np. 50; mniej = szybciej,
+  ale ciemniej w szkle i zakamarkach), odszumianie, zapis.
 - **Światła** – lampa sufitowa i światło przednie do włączania i wyłączania.
 - **Obiekty na scenie** – lista obiektów: kolumna i szklana kula sceny (można je przesuwać i obracać
   tak jak dodane obiekty – polami X / Y / Z i Obrót, strzałkami, Q / E, Ctrl + przeciąganiem – usunąć i przywrócić

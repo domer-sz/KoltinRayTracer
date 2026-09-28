@@ -36,7 +36,8 @@ class SceneFileTest {
                     MaterialSpec(MaterialKind.METAL, 0.9f, 0.7f, 0.3f, 0.05)),
                 SavedObject("Kula 1", "ball", null, 100.0, 20.0, 50.0, 0.0, 80.0, 40.0, 40.0, false,
                     MaterialSpec(MaterialKind.GLASS, 1f, 1f, 1f, 1.5))
-            )
+            ),
+            depth = 12
         )
         val file = File(dir, "scena.rtscene")
         SceneFile.write(file, saved)
@@ -47,7 +48,7 @@ class SceneFileTest {
         assertEquals("cornell-final", read.scene)
         assertEquals(mapOf("rt.block" to "checker"), read.properties)
         assertArrayEquals(saved.camera, read.camera, 1e-9)
-        assertEquals(listOf(800, 600, 2048), listOf(read.width, read.height, read.samples))
+        assertEquals(listOf(800, 600, 2048, 12), listOf(read.width, read.height, read.samples, read.depth))
         assertTrue(read.raytrace)
         assertEquals(false, read.denoise)
         assertEquals(saved.parts.map { it.name to it.enabled }, read.parts.map { it.name to it.enabled })
