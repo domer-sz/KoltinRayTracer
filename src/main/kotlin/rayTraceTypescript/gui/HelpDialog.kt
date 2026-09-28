@@ -42,8 +42,12 @@ object HelpDialog {
         "Obraz" to listOf(
             "T" to "Szybki podgląd (domyślny, do ustawiania sceny) / ray tracing",
             "D" to "Odszumianie włącz / wyłącz (ray tracing)",
-            "S" to "Zapisz obraz (PPM i PNG, z odszumioną kopią)",
+            "S" to "Zapisz obraz pod wybraną nazwą (PPM i PNG, z odszumioną kopią)",
             "Panel: rozdzielczość, Cel spp" to "Rozmiar obrazu i liczba próbek, przy której render się kończy"
+        ),
+        "Scena" to listOf(
+            "Ctrl + S" to "Zapisz scenę do pliku .rtscene: kamera, rozdzielczość, spp, tryb, światła, obiekty z materiałami",
+            "Ctrl + O" to "Wczytaj scenę z pliku .rtscene (modele wczytują się ze ścieżek zapisanych w pliku)"
         ),
         "Okno" to listOf(
             "F1 lub H" to "Ta pomoc",

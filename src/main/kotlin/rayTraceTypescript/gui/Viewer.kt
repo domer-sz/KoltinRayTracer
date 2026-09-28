@@ -39,7 +39,10 @@ import java.time.format.DateTimeFormatter
 import java.util.concurrent.CopyOnWriteArrayList
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.atomic.AtomicInteger
+import javax.swing.JFileChooser
 import javax.swing.JFrame
+import javax.swing.JOptionPane
+import javax.swing.filechooser.FileNameExtensionFilter
 import javax.swing.JPanel
 import javax.swing.SwingUtilities
 import kotlin.math.asin
@@ -183,6 +186,8 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
                     controls.refreshObjects()
                 }
             }
+            // -Drt.gui.load=scene.rtscene opens a saved scene (Main has already picked its base scene).
+            System.getProperty("rt.gui.load")?.let { controls.loadScene(File(it)) }
         }
         val renderThread = Thread({ renderLoop() }, "viewer-render").apply { start() }
         closed.await()
@@ -205,7 +210,7 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
             try {
                 val mesh = MeshLoader.load(file.toPath())
                 val extension = file.extension.lowercase()
-                val placed = PlacedObject(file.nameWithoutExtension, Shape.Model(mesh)).apply {
+                val placed = PlacedObject(file.nameWithoutExtension, Shape.Model(mesh), file.absoluteFile).apply {
                     // Files made for 3D printing stand on z; the rest mostly use y as up.
                     zUp = extension == "stl" || extension == "3mf"
                     x = defaultObjectPosition[0]
@@ -280,8 +285,141 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
         sceneVersion.incrementAndGet()
     }
 
-    fun requestSave() {
-        saveRequested = true
+    /** Where the next save goes, without an extension; chosen in [chooseSave]. */
+    @Volatile private var savePath: Path? = null
+    private var lastSaveFolder: File = saveFolder.toFile()
+
+    /**
+     * Asks for the file name and folder (UI thread), suggesting viewer-<scene>-<time>, then has
+     * the render thread save: PPM and PNG under that name, the denoised copy with -denoised added.
+     */
+    fun chooseSave(owner: java.awt.Component) {
+        val stamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"))
+        val chooser = JFileChooser(lastSaveFolder).apply {
+            dialogTitle = "Zapisz render"
+            fileFilter = FileNameExtensionFilter("Obraz (PNG i PPM)", "png", "ppm")
+            selectedFile = File(lastSaveFolder, "viewer-${scene.name}-$stamp.png")
+        }
+        while (true) {
+            if (chooser.showSaveDialog(owner) != JFileChooser.APPROVE_OPTION) return
+            // The name without .png / .ppm: both files, and the denoised pair, are made from it.
+            val chosen = chooser.selectedFile
+            val base = File(chosen.parentFile, chosen.name.replace(Regex("\\.(png|ppm)$", RegexOption.IGNORE_CASE), ""))
+            val existing = listOf(".png", ".ppm").map { File(base.path + it) }.firstOrNull { it.exists() }
+            if (existing != null && JOptionPane.showConfirmDialog(
+                    owner, "Plik ${existing.name} już istnieje. Zastąpić go?", "Zapisz render", JOptionPane.YES_NO_OPTION
+                ) != JOptionPane.YES_OPTION
+            ) continue
+            lastSaveFolder = base.parentFile
+            savePath = base.toPath()
+            saveRequested = true
+            return
+        }
+    }
+
+    // ------------------------------------------------------------------ scene files (UI thread)
+
+    /** Writes the window's scene to [file]: camera, image settings, lights, and every object. */
+    fun saveScene(file: File) {
+        val v = view
+        val saved = SavedScene(
+            scene = scene.name,
+            properties = SceneFile.SCENE_PROPERTIES.mapNotNull { key -> System.getProperty(key)?.let { key to it } }.toMap(),
+            camera = doubleArrayOf(v.target[0], v.target[1], v.target[2], v.yaw, v.pitch, v.radius, v.vfov),
+            width = resolution.width,
+            height = resolution.height,
+            samples = targetSamples,
+            raytrace = raytrace,
+            denoise = denoiseOn,
+            parts = builtIns.associate { it.part.name to it.enabled },
+            objects = objects.map { o ->
+                val shape = when (o.shape) {
+                    is Shape.Model -> "model"
+                    Shape.Ball -> "ball"
+                    Shape.Block -> "block"
+                }
+                SavedObject(o.name, shape, o.source, o.x, o.y, o.z, o.rotation, o.height, o.width, o.depth, o.zUp, o.material)
+            }
+        )
+        SceneFile.write(file, saved)
+        status = "Zapisano scenę ${file.name}"
+        panel.repaint()
+    }
+
+    /**
+     * Reads [file] off the UI thread - loading its models, each file once - and then puts the
+     * window in that state all at once. [onDone] gets an error that stopped the load, or null,
+     * and warnings about what could not be restored (a missing model file, other scene switches).
+     */
+    fun loadScene(file: File, onDone: (String?, List<String>) -> Unit) {
+        status = "Wczytuję scenę ${file.name}…"
+        panel.repaint()
+        Thread({
+            val warnings = mutableListOf<String>()
+            try {
+                val s = SceneFile.read(file)
+                require(s.scene == scene.name) {
+                    "Plik ${file.name} jest dla sceny ${s.scene}, a okno pokazuje ${scene.name}.\n" +
+                        "Otwórz go od początku:  mvn exec:java \"-Drt.gui.load=${file.path}\""
+                }
+                s.properties.forEach { (key, value) ->
+                    if (System.getProperty(key) != value) {
+                        warnings += "Scena była zapisana z -D$key=$value; otwórz ją przez -Drt.gui.load, żeby to odtworzyć."
+                    }
+                }
+                val meshes = HashMap<File, rayTraceTypescript.objects.Mesh>()
+                val loaded = s.objects.mapNotNull { o ->
+                    val shape = when (o.shape) {
+                        "ball" -> Shape.Ball
+                        "block" -> Shape.Block
+                        else -> {
+                            val source = o.file
+                            if (source == null || !source.isFile) {
+                                warnings += "Nie ma pliku modelu ${source?.path ?: o.name} - pominięty."
+                                return@mapNotNull null
+                            }
+                            status = "Wczytuję ${source.name}…"
+                            panel.repaint()
+                            try {
+                                Shape.Model(meshes.getOrPut(source) { MeshLoader.load(source.toPath()) })
+                            } catch (t: Throwable) {
+                                warnings += "Nie udało się wczytać ${source.name}: ${t.message} - pominięty."
+                                return@mapNotNull null
+                            }
+                        }
+                    }
+                    PlacedObject(o.name, shape, if (shape is Shape.Model) o.file else null).apply {
+                        x = o.x
+                        y = o.y
+                        z = o.z
+                        rotation = o.rotation
+                        height = o.height
+                        width = o.width
+                        depth = o.depth
+                        zUp = o.zUp
+                        material = o.material
+                    }
+                }
+
+                objects.clear()
+                objects.addAll(loaded)
+                builtIns.forEach { b -> s.parts[b.part.name]?.let { b.enabled = it } }
+                selected = null
+                targetSamples = s.samples.coerceAtLeast(1)
+                raytrace = s.raytrace
+                denoiseOn = s.denoise
+                view = View(doubleArrayOf(s.camera[0], s.camera[1], s.camera[2]), s.camera[3], s.camera[4], s.camera[5], s.camera[6])
+                resolution = Resolution(s.width.coerceIn(64, 8192), s.height.coerceIn(64, 8192))
+                sceneChanged()
+                status = "Wczytano scenę ${file.name}"
+                panel.repaint()
+                SwingUtilities.invokeLater { onDone(null, warnings) }
+            } catch (t: Throwable) {
+                status = "Nie wczytano sceny ${file.name}"
+                panel.repaint()
+                SwingUtilities.invokeLater { onDone(t.message ?: t.toString(), warnings) }
+            }
+        }, "viewer-scene-load").apply { isDaemon = true; start() }
     }
 
     // ------------------------------------------------------------------ rendering (render thread)
@@ -525,14 +663,22 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
 
     private fun save(setup: CameraSetup, sums: FloatArray, samples: Int, denoised: FloatArray?) {
         saveRequested = false
-        val stamp = LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"))
-        val path = saveFolder.resolve("viewer-${scene.name}-$stamp.ppm")
-        PpmWriter.write(path, setup.imageWidth, setup.imageHeight, FloatArray(sums.size) { sums[it] / samples })
-        if (denoised != null) {
-            PpmWriter.write(path.resolveSibling("viewer-${scene.name}-$stamp-denoised.ppm"), setup.imageWidth, setup.imageHeight, denoised)
+        val base = savePath ?: saveFolder.resolve(
+            "viewer-${scene.name}-${LocalDateTime.now().format(DateTimeFormatter.ofPattern("yyyyMMdd-HHmmss"))}"
+        )
+        val path = Path.of("$base.ppm")
+        try {
+            path.parent?.let { java.nio.file.Files.createDirectories(it) }
+            PpmWriter.write(path, setup.imageWidth, setup.imageHeight, FloatArray(sums.size) { sums[it] / samples })
+            if (denoised != null) {
+                PpmWriter.write(Path.of("$base-denoised.ppm"), setup.imageWidth, setup.imageHeight, denoised)
+            }
+            status = "Zapisano ${base.fileName}.png / .ppm${if (denoised != null) " i -denoised" else ""} ($samples spp)"
+            System.err.println("[viewer] saved $path ($samples spp)")
+        } catch (e: Exception) {
+            status = "Nie udało się zapisać ${path.fileName}: ${e.message}"
+            System.err.println("[viewer] could not save $path: $e")
         }
-        status = "Zapisano ${path.fileName} ($samples spp)"
-        System.err.println("[viewer] saved $path ($samples spp)")
     }
 
     /** The scene's own camera, moved to [view] and sized to [size]. */
@@ -771,7 +917,8 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
                     KeyEvent.VK_R -> { view = initialView; touch() }
                     KeyEvent.VK_D -> { denoiseOn = !denoiseOn; controls.syncDenoise() }
                     KeyEvent.VK_T -> { raytrace = !raytrace; controls.syncMode() }
-                    KeyEvent.VK_S -> requestSave()
+                    KeyEvent.VK_S -> if (e.isControlDown) controls.chooseSceneToSave() else chooseSave(frame)
+                    KeyEvent.VK_O -> if (e.isControlDown) controls.chooseSceneToLoad()
                     KeyEvent.VK_PLUS, KeyEvent.VK_ADD, KeyEvent.VK_EQUALS -> { view = view.with(vfov = (view.vfov - 2).coerceAtLeast(5.0)); touch() }
                     KeyEvent.VK_MINUS, KeyEvent.VK_SUBTRACT -> { view = view.with(vfov = (view.vfov + 2).coerceAtMost(120.0)); touch() }
                     KeyEvent.VK_DELETE -> selected?.let { removeObject(it); controls.refreshObjects() }

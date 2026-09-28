@@ -52,6 +52,9 @@ class ControlPanel(private val viewer: Viewer, private val frame: JFrame) : JPan
     private val applySize = JButton("Zastosuj rozdzielczość")
     private val target = JSpinner(SpinnerNumberModel(viewer.targetSamples, 1, 1_000_000, 64))
     private val progress = JProgressBar(0, 1000).apply { isStringPainted = true }
+    private val saveSceneButton = JButton("Zapisz…").apply { toolTipText = "Zapisz scenę do pliku .${SceneFile.EXTENSION} (Ctrl+S)" }
+    private val loadSceneButton = JButton("Wczytaj…").apply { toolTipText = "Wczytaj scenę z pliku .${SceneFile.EXTENSION} (Ctrl+O)" }
+    private var lastSceneFolder: File = File(".").absoluteFile
     private val quick = JRadioButton("Szybki podgląd", !viewer.raytrace)
     private val raytrace = JRadioButton("Ray tracing", viewer.raytrace)
     private val denoise = JCheckBox("Odszumianie (D)", viewer.denoiseOn)
@@ -97,6 +100,12 @@ class ControlPanel(private val viewer: Viewer, private val frame: JFrame) : JPan
 
     init {
         border = BorderFactory.createEmptyBorder(10, 10, 10, 10)
+
+        section("Scena")
+        full(JPanel(GridBagLayout()).apply {
+            add(saveSceneButton, GridBagConstraints().apply { weightx = 1.0; fill = GridBagConstraints.HORIZONTAL; insets = Insets(0, 0, 0, 4) })
+            add(loadSceneButton, GridBagConstraints().apply { weightx = 1.0; fill = GridBagConstraints.HORIZONTAL })
+        })
 
         section("Tryb (T)")
         ButtonGroup().apply { add(quick); add(raytrace) }
@@ -162,9 +171,11 @@ class ControlPanel(private val viewer: Viewer, private val frame: JFrame) : JPan
         }
         target.addChangeListener { viewer.targetSamples = target.value as Int }
         denoise.addActionListener { viewer.denoiseOn = denoise.isSelected }
+        saveSceneButton.addActionListener { chooseSceneToSave() }
+        loadSceneButton.addActionListener { chooseSceneToLoad() }
         quick.addActionListener { viewer.raytrace = false; syncMode() }
         raytrace.addActionListener { viewer.raytrace = true; syncMode() }
-        save.addActionListener { viewer.requestSave() }
+        save.addActionListener { viewer.chooseSave(frame) }
 
         add.addActionListener { chooseModel() }
         remove.addActionListener { viewer.selected?.let { viewer.removeObject(it); refreshObjects() } }
@@ -238,6 +249,68 @@ class ControlPanel(private val viewer: Viewer, private val frame: JFrame) : JPan
             }
             if (placed != null) refreshObjects()
         }
+    }
+
+    private fun sceneChooser() = JFileChooser(lastSceneFolder).apply {
+        fileFilter = FileNameExtensionFilter("Scena ray tracera (.${SceneFile.EXTENSION})", SceneFile.EXTENSION)
+    }
+
+    /** Asks for a file name and saves the scene there, adding the extension when it is missing. */
+    fun chooseSceneToSave() {
+        val chooser = sceneChooser().apply {
+            dialogTitle = "Zapisz scenę"
+            selectedFile = File(lastSceneFolder, "scena.${SceneFile.EXTENSION}")
+        }
+        while (true) {
+            if (chooser.showSaveDialog(frame) != JFileChooser.APPROVE_OPTION) return
+            var file = chooser.selectedFile
+            if (!file.name.endsWith(".${SceneFile.EXTENSION}", ignoreCase = true)) file = File(file.path + ".${SceneFile.EXTENSION}")
+            if (file.exists() && JOptionPane.showConfirmDialog(
+                    frame, "Plik ${file.name} już istnieje. Zastąpić go?", "Zapisz scenę", JOptionPane.YES_NO_OPTION
+                ) != JOptionPane.YES_OPTION
+            ) continue
+            lastSceneFolder = file.absoluteFile.parentFile
+            try {
+                viewer.saveScene(file)
+            } catch (e: Exception) {
+                JOptionPane.showMessageDialog(frame, "Nie udało się zapisać sceny:\n${e.message}", "Zapisz scenę", JOptionPane.ERROR_MESSAGE)
+            }
+            return
+        }
+    }
+
+    fun chooseSceneToLoad() {
+        val chooser = sceneChooser().apply { dialogTitle = "Wczytaj scenę" }
+        if (chooser.showOpenDialog(frame) != JFileChooser.APPROVE_OPTION) return
+        loadScene(chooser.selectedFile)
+    }
+
+    /** Loads [file] into the window, then refreshes every field and reports what went wrong. */
+    fun loadScene(file: File) {
+        lastSceneFolder = file.absoluteFile.parentFile
+        loadSceneButton.isEnabled = false
+        viewer.loadScene(file) { error, warnings ->
+            loadSceneButton.isEnabled = true
+            syncAll()
+            if (error != null) {
+                JOptionPane.showMessageDialog(frame, "Nie udało się wczytać sceny:\n$error", "Wczytaj scenę", JOptionPane.ERROR_MESSAGE)
+            } else if (warnings.isNotEmpty()) {
+                JOptionPane.showMessageDialog(frame, warnings.joinToString("\n"), "Scena wczytana z uwagami", JOptionPane.WARNING_MESSAGE)
+            }
+        }
+    }
+
+    /** Fills every field from the viewer, after a scene was loaded into it. */
+    fun syncAll() {
+        syncing = true
+        width.value = viewer.resolution.width
+        height.value = viewer.resolution.height
+        target.value = viewer.targetSamples
+        lightSwitches.forEachIndexed { i, box -> box.isSelected = viewer.lights[i].enabled }
+        syncing = false
+        syncDenoise()
+        syncMode()
+        refreshObjects()
     }
 
     /** Rebuilds the list from the viewer's objects and shows the selected one's fields. */

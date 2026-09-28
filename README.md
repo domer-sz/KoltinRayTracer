@@ -77,7 +77,8 @@ Pełna lista jest też w oknie pod **F1** (albo **H**, albo przycisk *Pomoc* w p
 | Obróć zaznaczony model o 15° | `Q` / `E` albo `[` / `]` |
 | Usuń zaznaczony obiekt | `Delete` |
 | Odszumianie włącz / wyłącz | `D` |
-| Zapisz obraz (PPM + PNG, z odszumioną kopią) | `S` |
+| Zapisz obraz pod wybraną nazwą (PPM + PNG, z odszumioną kopią) | `S` |
+| Zapisz scenę / wczytaj scenę (`.rtscene`) | `Ctrl+S` / `Ctrl+O` |
 | Pomoc | `F1` / `H` |
 | Zamknij | `Esc` |
 
@@ -87,6 +88,7 @@ próbki do celu ustawionego w panelu i jest odszumiany przy 16, 64, 256… prób
 
 ## Panel boczny
 
+- **Scena** – *Zapisz…* / *Wczytaj…* (Ctrl+S / Ctrl+O): cała scena w pliku tekstowym `.rtscene`.
 - **Tryb** – szybki podgląd albo ray tracing (to samo co `T`).
 - **Obraz** – gotowe rozdzielczości albo własna szerokość i wysokość (*Zastosuj rozdzielczość*),
   **Cel spp** (liczba próbek, przy której render się kończy) z paskiem postępu, odszumianie, zapis.
@@ -102,8 +104,26 @@ próbki do celu ustawionego w panelu i jest odszumiany przy 16, 64, 256… prób
   (chropowatość metalu, współczynnik załamania szkła, moc światła).
   *Oś Z w górę* włącza się sama dla plików do druku 3D (STL, 3MF).
 
-Zapisane obrazy trafiają do katalogu roboczego (albo tam, gdzie wskazuje `-Drt.out`) jako
-`viewer-<scena>-<data>.ppm/.png` i `…-denoised.ppm/.png`.
+## Zapis obrazu i sceny
+
+**Obraz** (`S` albo *Zapisz obraz*): okno zapisu podpowiada `viewer-<scena>-<data>` w katalogu
+roboczym (albo tam, gdzie wskazuje `-Drt.out`); można wpisać dowolną nazwę i wybrać folder.
+Powstają `<nazwa>.ppm` i `<nazwa>.png`, a w trybie ray tracing z odszumianiem także
+`<nazwa>-denoised.ppm/.png`. Końcówka `.png`/`.ppm` w nazwie jest pomijana, a istniejące pliki
+nadpisują się dopiero po potwierdzeniu.
+
+**Scena** (`Ctrl+S` / `Ctrl+O` albo przyciski w sekcji *Scena*): plik `.rtscene` zapamiętuje
+scenę bazową (z przełącznikami takimi jak `-Drt.block=checker`), kamerę, rozdzielczość, cel spp,
+tryb, odszumianie, włączone światła, usunięte obiekty sceny oraz każdy dodany obiekt: kształt,
+położenie, obrót, wymiary, oś Z i materiał. Modele zapisuje jako ścieżki do plików, względne wobec
+pliku sceny, więc scena zapisana w repozytorium otworzy się z innej kopii. To zwykły tekst – można
+go poprawiać ręcznie.
+
+Scenę można też otworzyć od razu przy starcie (scena bazowa i przełączniki są brane z pliku):
+
+```
+mvn exec:java "-Drt.gui.load=moja-scena.rtscene"
+```
 
 ## Render do pliku (bez okna)
 

@@ -21,6 +21,15 @@ fun main() {
     // Renders from the command line are denoised unless -Drt.denoise=off. The renderer itself
     // only denoises when asked, so tests and other callers keep getting the raw image.
     if (System.getProperty("rt.denoise") == null) System.setProperty("rt.denoise", "on")
+    // -Drt.gui.load=scene.rtscene opens a scene saved in the window: its base scene and the
+    // switches it was built with come from the file (flags given here still win), then the
+    // window restores the rest.
+    System.getProperty("rt.gui.load")?.let { path ->
+        val saved = rayTraceTypescript.gui.SceneFile.read(java.io.File(path))
+        System.setProperty("rt.scene", saved.scene)
+        saved.properties.forEach { (key, value) -> if (System.getProperty(key) == null) System.setProperty(key, value) }
+        if (System.getProperty("rt.gui") == null) System.setProperty("rt.gui", "")
+    }
     val scene =BookScenes.byName(System.getProperty("rt.scene", "earth"))
     // The books' final scenes are quoted at sample counts that take hours; these let a scene
     // be scaled down without editing it.

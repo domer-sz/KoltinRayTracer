@@ -111,9 +111,10 @@ sealed interface Shape {
 /**
  * An object added in the viewer and where and how it stands. [x], [y], [z] are the middle of
  * its footprint, [height] its size, [rotation] its turn about the vertical in degrees. A block
- * also has its own [width] and [depth]; a model is scaled so its height is [height].
+ * also has its own [width] and [depth]; a model is scaled so its height is [height]. A model
+ * remembers its [source] file, which a saved scene points to.
  */
-class PlacedObject(val name: String, val shape: Shape) : SceneEntry {
+class PlacedObject(val name: String, val shape: Shape, val source: java.io.File? = null) : SceneEntry {
     @Volatile var x = 0.0
     @Volatile var y = 0.0
     @Volatile var z = 0.0

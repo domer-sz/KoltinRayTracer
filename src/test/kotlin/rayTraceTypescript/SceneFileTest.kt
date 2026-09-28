@@ -1,0 +1,61 @@
+package rayTraceTypescript
+
+import org.junit.jupiter.api.Assertions.assertArrayEquals
+import org.junit.jupiter.api.Assertions.assertEquals
+import org.junit.jupiter.api.Assertions.assertTrue
+import org.junit.jupiter.api.Test
+import org.junit.jupiter.api.io.TempDir
+import rayTraceTypescript.gui.MaterialKind
+import rayTraceTypescript.gui.MaterialSpec
+import rayTraceTypescript.gui.SavedObject
+import rayTraceTypescript.gui.SavedScene
+import rayTraceTypescript.gui.SceneFile
+import java.io.File
+
+class SceneFileTest {
+
+    @Test
+    fun `a saved scene reads back the same`(@TempDir dir: File) {
+        val model = File(dir, "models/ork zbrojny.stl").apply { parentFile.mkdirs(); writeText("solid") }
+        val saved = SavedScene(
+            scene = "cornell-final",
+            properties = mapOf("rt.block" to "checker"),
+            camera = doubleArrayOf(278.0, 278.0, 0.0, 0.25, -0.1, 800.0, 40.0),
+            width = 800,
+            height = 600,
+            samples = 2048,
+            raytrace = true,
+            denoise = false,
+            parts = linkedMapOf("Lampa sufitowa" to true, "Światło przednie" to false, "Szklana kula" to false),
+            objects = listOf(
+                SavedObject("Ork\\z mieczem", "model", model, 292.0, 0.0, 277.5, 45.0, 145.6, 0.5, 0.5, true,
+                    MaterialSpec(MaterialKind.METAL, 0.9f, 0.7f, 0.3f, 0.05)),
+                SavedObject("Kula 1", "ball", null, 100.0, 20.0, 50.0, 0.0, 80.0, 40.0, 40.0, false,
+                    MaterialSpec(MaterialKind.GLASS, 1f, 1f, 1f, 1.5))
+            )
+        )
+        val file = File(dir, "scena.rtscene")
+        SceneFile.write(file, saved)
+        // Paths inside the folder stay relative, so the scene moves with it.
+        assertTrue(file.readText().contains("object.0.file=models/ork zbrojny.stl"), file.readText())
+
+        val read = SceneFile.read(file)
+        assertEquals("cornell-final", read.scene)
+        assertEquals(mapOf("rt.block" to "checker"), read.properties)
+        assertArrayEquals(saved.camera, read.camera, 1e-9)
+        assertEquals(listOf(800, 600, 2048), listOf(read.width, read.height, read.samples))
+        assertTrue(read.raytrace)
+        assertEquals(false, read.denoise)
+        assertEquals(saved.parts, read.parts)
+        assertEquals(2, read.objects.size)
+        val ork = read.objects[0]
+        assertEquals("Ork\\z mieczem", ork.name)
+        assertEquals(model.canonicalFile, ork.file!!.canonicalFile)
+        assertEquals(listOf(292.0, 0.0, 277.5, 45.0, 145.6), listOf(ork.x, ork.y, ork.z, ork.rotation, ork.height))
+        assertTrue(ork.zUp)
+        assertEquals(saved.objects[0].material, ork.material)
+        assertEquals("ball", read.objects[1].shape)
+        assertEquals(null, read.objects[1].file)
+        assertEquals(saved.objects[1].material, read.objects[1].material)
+    }
+}
