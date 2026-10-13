@@ -23,22 +23,26 @@ import rayTraceTypescript.scenes.ScenePart
 /** An object listed in the viewer: part of the scene itself, or a model added there. */
 sealed interface SceneEntry
 
-/** Something whose material the viewer lets one change: an added object or a wall. */
+/** Something whose material the viewer lets one change: an added object, a wall or a scene object. */
 sealed interface HasMaterial : SceneEntry {
     var material: MaterialSpec
+}
+
+/** A scene's own object or wall: what the scene made it of, to go back to. */
+sealed interface SceneMaterial : HasMaterial {
+    val original: MaterialSpec
+    val changed: Boolean get() = material != original
 }
 
 /**
  * One of the room's walls (a [ScenePart] marked as a surface). It stays where it is; its
  * material can be changed, and a changed wall is rebuilt as the same quad made of that.
  */
-class WallObject(val part: ScenePart) : HasMaterial {
+class WallObject(val part: ScenePart) : SceneMaterial {
     private val quad = part.hittable as? Quad
     /** What the scene made it of, when that is a plain colour the editor can show. */
-    val original: MaterialSpec = originalSpec()
+    override val original: MaterialSpec = quad?.let { MaterialSwap.specOf(it.material) } ?: MaterialPreset.WHITE.spec
     @Volatile override var material: MaterialSpec = original
-
-    val changed: Boolean get() = material != original
 
     /** Whether the editor can remake it: a quad, which every wall of the Cornell box is. */
     val editable: Boolean get() = quad != null
@@ -47,13 +51,6 @@ class WallObject(val part: ScenePart) : HasMaterial {
         val q = quad
         if (!changed || q == null) return part.hittable
         return Quad(q.q, q.u, q.v, material.material())
-    }
-
-    private fun originalSpec(): MaterialSpec {
-        val m = quad?.material
-        val colour = ((m as? Lambertian)?.texture as? rayTraceTypescript.textures.SolidColorTexture)?.albedo
-        return if (colour != null) MaterialSpec(MaterialKind.MATTE, colour.r, colour.g, colour.b)
-        else MaterialPreset.WHITE.spec
     }
 
     override fun toString() = part.name
@@ -77,9 +74,22 @@ sealed interface Movable : SceneEntry {
  * An object or light the scene came with. The viewer can take it out (switch it off), put it
  * back, and move and turn it: it then stands wrapped in a turn about its footprint's middle and
  * a move, and so does its stand-in for light sampling, so the renderer still aims at it.
+ * An object's material can be changed - it is then rebuilt, same shapes, in the new one - and a
+ * light's [power] scales what it gives off.
  */
-class BuiltInObject(val part: ScenePart) : Movable {
+class BuiltInObject(val part: ScenePart) : Movable, SceneMaterial {
     @Volatile var enabled = part.enabled
+
+    /**
+     * What the scene made it of, as the editor shows it; plain white matte for what it cannot
+     * show (the checkered column), which stays checkered until another material is chosen.
+     */
+    override val original: MaterialSpec =
+        MaterialSwap.firstMaterial(part.hittable)?.let { MaterialSwap.specOf(it) } ?: MaterialPreset.WHITE.spec
+    @Volatile override var material: MaterialSpec = original
+
+    /** For a light: how many times its own strength it shines with. */
+    @Volatile var power = 1.0
 
     /** Where the scene put it: the middle of its footprint, at its lowest point. */
     private val home: DoubleArray
@@ -111,8 +121,14 @@ class BuiltInObject(val part: ScenePart) : Movable {
         rotation = 0.0
     }
 
-    /** The part as it now stands. */
-    fun hittable(): Hittable = placed(part.hittable)
+    /** The part as it now stands, in its material or at its power. */
+    fun hittable(): Hittable = placed(dressed(part.hittable))
+
+    private fun dressed(h: Hittable): Hittable = when {
+        part.isLight -> if (power == 1.0) h else MaterialSwap.rebuild(h) { MaterialSwap.brighter(it, power) }
+        changed -> material.material().let { m -> MaterialSwap.rebuild(h) { m } }
+        else -> h
+    }
 
     /** Its stand-in for light sampling, moved along with it. */
     fun lightProxy(): Hittable? = part.lightProxy?.let { placed(it) }

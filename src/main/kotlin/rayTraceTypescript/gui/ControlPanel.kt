@@ -77,6 +77,15 @@ class ControlPanel(private val viewer: Viewer, private val frame: JFrame) : JPan
             addActionListener { viewer.setLight(light, isSelected) }
         }
     }
+    /** Each light's power, as a multiple of the strength the scene gave it. */
+    private val lightPowers = viewer.lights.map { light ->
+        JSpinner(SpinnerNumberModel(light.power, 0.05, 50.0, 0.1)).apply {
+            editor = JSpinner.NumberEditor(this, "0.0#'×'")
+            toolTipText = "Moc światła: wielokrotność mocy ze sceny (1× jak w scenie)"
+            preferredSize = Dimension(84, preferredSize.height)
+            addChangeListener { if (!syncing) viewer.setLightPower(light, value as Double) }
+        }
+    }
     private val restore = JButton("Przywróć obiekty sceny")
 
     private val listModel = DefaultListModel<SceneEntry>()
@@ -176,7 +185,15 @@ class ControlPanel(private val viewer: Viewer, private val frame: JFrame) : JPan
 
         if (lightSwitches.isNotEmpty()) {
             section("Światła")
-            lightSwitches.forEach { full(it) }
+            // One row a light: its switch, then its power.
+            lightSwitches.forEachIndexed { i, box ->
+                full(JPanel(GridBagLayout()).apply {
+                    isOpaque = false
+                    add(box, GridBagConstraints().apply { weightx = 1.0; anchor = GridBagConstraints.WEST })
+                    add(JLabel("Moc").apply { foreground = Theme.muted }, GridBagConstraints().apply { insets = Insets(0, 8, 0, 6) })
+                    add(lightPowers[i], GridBagConstraints())
+                })
+            }
         }
 
         section("Obiekty na scenie")
@@ -276,8 +293,8 @@ class ControlPanel(private val viewer: Viewer, private val frame: JFrame) : JPan
         }
         parameter.addChangeListener { editMaterial { o -> o.material = o.material.copy(parameter = parameter.value as Double) } }
         wallReset.addActionListener {
-            val wall = viewer.selected as? WallObject ?: return@addActionListener
-            editMaterial { wall.material = wall.original }
+            val own = viewer.selected as? SceneMaterial ?: return@addActionListener
+            editMaterial { own.material = own.original }
             refreshSelection()
         }
         zUp.addActionListener { edit { o -> o.zUp = zUp.isSelected } }
@@ -295,7 +312,7 @@ class ControlPanel(private val viewer: Viewer, private val frame: JFrame) : JPan
         val o = viewer.selectedMovable ?: return
         change(o)
         viewer.sceneChanged()
-        restore.isEnabled = viewer.builtIns.any { !it.part.isLight && (!it.enabled || it.moved) }
+        restore.isEnabled = viewer.builtIns.any { !it.part.isLight && (!it.enabled || it.moved || it.changed) }
     }
 
     /** Changes the material of the selection - an added object or a wall - unless the panel is filling its fields. */
@@ -392,6 +409,7 @@ class ControlPanel(private val viewer: Viewer, private val frame: JFrame) : JPan
         target.value = viewer.targetSamples
         depth.value = viewer.maxDepth
         lightSwitches.forEachIndexed { i, box -> box.isSelected = viewer.lights[i].enabled }
+        lightPowers.forEachIndexed { i, spinner -> spinner.value = viewer.lights[i].power }
         syncing = false
         syncDenoise()
         syncMode()
@@ -417,19 +435,20 @@ class ControlPanel(private val viewer: Viewer, private val frame: JFrame) : JPan
         val m = viewer.selectedMovable
         val mat = viewer.selectedMaterial
         val wall = viewer.selected as? WallObject
+        val own = viewer.selected as? SceneMaterial
         syncing = true
         remove.isEnabled = viewer.selected != null && wall == null
         placeFields.forEach { it.isEnabled = m != null }
         modelFields.forEach { it.isEnabled = o != null }
         materialFields.forEach { it.isEnabled = mat != null }
-        wallReset.isVisible = wall != null
-        wallReset.isEnabled = wall?.changed == true
+        wallReset.isVisible = own != null
+        wallReset.isEnabled = own?.changed == true
         if (mat != null) showMaterial(mat.material, (mat as? PlacedObject)?.fileColours == true)
         // Only a loaded model can be stood up from z; only a block has its own width and depth.
         zUp.isEnabled = o?.isModel == true
         blockWidth.isEnabled = o?.shape == Shape.Block
         blockDepth.isEnabled = o?.shape == Shape.Block
-        restore.isEnabled = viewer.builtIns.any { !it.part.isLight && (!it.enabled || it.moved) }
+        restore.isEnabled = viewer.builtIns.any { !it.part.isLight && (!it.enabled || it.moved || it.changed) }
         if (m != null) {
             posX.value = m.x
             posY.value = m.y
@@ -437,7 +456,7 @@ class ControlPanel(private val viewer: Viewer, private val frame: JFrame) : JPan
             turn.value = m.rotation
         }
         if (viewer.selected is BuiltInObject) {
-            info.text = "Obiekt sceny - można go przesuwać, obracać i usunąć"
+            info.text = "Obiekt sceny - można go przesuwać, obracać, zmienić materiał i usunąć"
         } else if (wall != null) {
             info.text = "Ściana - można zmienić jej materiał"
         } else if (o != null) {

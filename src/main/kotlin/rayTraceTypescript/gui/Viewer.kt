@@ -301,17 +301,27 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
         sceneChanged()
     }
 
-    /** Puts every removed or moved object of the scene back where it was (lights keep their switches). */
+    /**
+     * Puts every removed, moved or restyled object of the scene back as it was (lights keep
+     * their switches and power).
+     */
     fun restoreBuiltIns() {
         builtIns.filter { !it.part.isLight }.forEach {
             it.enabled = true
             it.returnHome()
+            it.material = it.original
         }
         sceneChanged()
     }
 
     fun setLight(light: BuiltInObject, on: Boolean) {
         light.enabled = on
+        sceneChanged()
+    }
+
+    /** Sets how many times its own strength [light] shines with. */
+    fun setLightPower(light: BuiltInObject, power: Double) {
+        light.power = power
         sceneChanged()
     }
 
@@ -376,7 +386,10 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
             raytrace = raytrace,
             denoise = denoiseOn,
             parts = builtIns.map { b ->
-                SavedPart(b.part.name, b.enabled, if (b.moved) doubleArrayOf(b.x, b.y, b.z) else null, b.rotation)
+                SavedPart(
+                    b.part.name, b.enabled, if (b.moved) doubleArrayOf(b.x, b.y, b.z) else null, b.rotation,
+                    b.material.takeIf { b.changed }, b.power
+                )
             },
             objects = objects.map { o ->
                 val shape = when (o.shape) {
@@ -457,6 +470,8 @@ class Viewer(private val scene: SceneDefinition, private val saveFolder: Path) {
                     val saved = s.parts.firstOrNull { it.name == b.part.name } ?: return@forEach
                     b.enabled = saved.enabled
                     b.returnHome()
+                    b.material = saved.material ?: b.original
+                    b.power = saved.power
                     saved.position?.let { p ->
                         b.x = p[0]
                         b.y = p[1]

@@ -30,7 +30,8 @@ class SceneFileTest {
             denoise = false,
             parts = listOf(
                 SavedPart("Lampa sufitowa", true), SavedPart("Światło przednie", false),
-                SavedPart("Szklana kula", true, doubleArrayOf(120.0, 0.0, 250.5), -30.0)
+                SavedPart("Szklana kula", true, doubleArrayOf(120.0, 0.0, 250.5), -30.0, MaterialSpec(MaterialKind.METAL, 0.9f, 0.7f, 0.3f, 0.05)),
+                SavedPart("Lampa 2", true, power = 2.5)
             ),
             objects = listOf(
                 SavedObject("Ork\\z mieczem", "model", model, 292.0, 0.0, 277.5, 45.0, 145.6, 0.5, 0.5, true,
@@ -57,6 +58,10 @@ class SceneFileTest {
         assertEquals(null, read.parts[0].position)
         assertArrayEquals(doubleArrayOf(120.0, 0.0, 250.5), read.parts[2].position, 1e-9)
         assertEquals(-30.0, read.parts[2].rotation)
+        assertEquals(saved.parts[2].material, read.parts[2].material)
+        assertEquals(null, read.parts[0].material)
+        assertEquals(2.5, read.parts[3].power)
+        assertEquals(1.0, read.parts[0].power)
         assertEquals(listOf("Ściana lewa"), read.walls.map { it.name })
         assertEquals(saved.walls[0].material, read.walls[0].material)
         assertEquals(2, read.objects.size)

@@ -23,7 +23,16 @@ class SavedObject(
 )
 
 /** One of the scene's own objects or lights: whether it is in, and where it stands (null: where the scene put it). */
-class SavedPart(val name: String, val enabled: Boolean, val position: DoubleArray? = null, val rotation: Double = 0.0)
+class SavedPart(
+    val name: String,
+    val enabled: Boolean,
+    val position: DoubleArray? = null,
+    val rotation: Double = 0.0,
+    /** Its material when changed from the scene's; null keeps the scene's. */
+    val material: MaterialSpec? = null,
+    /** For a light: how many times its own strength it shines with. */
+    val power: Double = 1.0
+)
 
 /** A wall whose material was changed. */
 class SavedWall(val name: String, val material: MaterialSpec)
@@ -86,6 +95,12 @@ object SceneFile {
                 lines += "part.$i.position=${p[0]},${p[1]},${p[2]}"
                 lines += "part.$i.rotation=${part.rotation}"
             }
+            part.material?.let { m ->
+                lines += "part.$i.material=${m.kind.name}"
+                lines += "part.$i.colour=${m.red},${m.green},${m.blue}"
+                lines += "part.$i.parameter=${m.parameter}"
+            }
+            if (part.power != 1.0) lines += "part.$i.power=${part.power}"
         }
         s.walls.forEachIndexed { i, w ->
             lines += "wall.$i.name=${escape(w.name)}"
@@ -121,6 +136,12 @@ object SceneFile {
             it.trim().toDoubleOrNull() ?: throw IllegalArgumentException("$key: \"$it\" nie jest liczbą")
         }.also { require(it.size == count) { "$key: oczekiwano $count liczb" } }
 
+        fun material(prefix: String): MaterialSpec {
+            val colour = numbers("$prefix.colour", 3)
+            val kind = MaterialKind.values().firstOrNull { it.name == text("$prefix.material") }
+                ?: throw IllegalArgumentException("$prefix.material: nieznany materiał ${text("$prefix.material")}")
+            return MaterialSpec(kind, colour[0].toFloat(), colour[1].toFloat(), colour[2].toFloat(), number("$prefix.parameter"))
+        }
         val target = numbers("camera.target", 3)
         val parts = mutableListOf<SavedPart>()
         var i = 0
@@ -128,15 +149,11 @@ object SceneFile {
             val position = p.getProperty("part.$i.position")?.let { numbers("part.$i.position", 3).toDoubleArray() }
             parts += SavedPart(
                 text("part.$i.name"), text("part.$i.enabled").toBoolean(), position,
-                p.getProperty("part.$i.rotation")?.toDoubleOrNull() ?: 0.0
+                p.getProperty("part.$i.rotation")?.toDoubleOrNull() ?: 0.0,
+                p.getProperty("part.$i.material")?.let { material("part.$i") },
+                p.getProperty("part.$i.power")?.toDoubleOrNull() ?: 1.0
             )
             i++
-        }
-        fun material(prefix: String): MaterialSpec {
-            val colour = numbers("$prefix.colour", 3)
-            val kind = MaterialKind.values().firstOrNull { it.name == text("$prefix.material") }
-                ?: throw IllegalArgumentException("$prefix.material: nieznany materiał ${text("$prefix.material")}")
-            return MaterialSpec(kind, colour[0].toFloat(), colour[1].toFloat(), colour[2].toFloat(), number("$prefix.parameter"))
         }
         val walls = mutableListOf<SavedWall>()
         i = 0
